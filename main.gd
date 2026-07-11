@@ -7,9 +7,18 @@ extends Node
 ## the real UI/world views in later chunks.
 
 const BatchRunner = preload("res://sim/batch_runner.gd")
+const MainScreenScene = preload("res://ui/main_screen.tscn")
 
 var _verify_mode: bool = false
 var _days_seen: int = 0
+const DEBUG_SCREENSHOT_PATH := "/tmp/godot_debug_screenshot.png"
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_F12:
+		var img := get_viewport().get_texture().get_image()
+		img.save_png(DEBUG_SCREENSHOT_PATH)
+		print("[Screenshot] Saved %s" % DEBUG_SCREENSHOT_PATH)
 
 
 func _ready() -> void:
@@ -61,6 +70,22 @@ func _run_interactive_mode(args: PackedStringArray) -> void:
 		_verify_mode = true
 		Clock.set_speed(40.0)
 		print("[Main] --verify flag detected: running clock at 40x speed, will quit after 2 day rollovers")
+
+	if not "--no-ui" in args:
+		var ui := MainScreenScene.instantiate()
+		add_child(ui)
+
+	var screenshot_path := _string_arg(args, "--screenshot=", "")
+	if not screenshot_path.is_empty():
+		_capture_screenshot_and_quit(screenshot_path)
+
+
+func _capture_screenshot_and_quit(path: String) -> void:
+	await get_tree().create_timer(1.5).timeout
+	var img := get_viewport().get_texture().get_image()
+	img.save_png(path)
+	print("[Screenshot] Saved %s" % path)
+	get_tree().quit()
 
 
 func _int_arg(args: PackedStringArray, prefix: String, default: int) -> int:
@@ -122,5 +147,5 @@ func _on_day_summary(summary: Dictionary) -> void:
 		summary["day"], summary["cash_end"], summary["cash_delta"], summary["hearts"], summary["reputation"],
 		summary["occupancy_rate"] * 100.0, summary["checkouts"], summary["positive_reviews"], summary["neutral_reviews"], summary["negative_reviews"],
 		summary["arrivals"], summary["matched_strict"], summary["matched_mismatched"],
-		summary["walked_away_mismatch"] + summary["walked_away_full"],
+		summary["walked_away_mismatch"] + summary["walked_away_full"] + summary["walked_away_too_expensive"],
 	])

@@ -35,6 +35,7 @@ static func generate(game_state: Node, rng: Node) -> Array:
 			"needs": s["needs"],
 			"likes": s["likes"],
 			"amenity_prefs": s["amenity_prefs"],
+			"budget": s["budget"],
 			"party_size": party_size,
 			"nights_total": nights,
 		})

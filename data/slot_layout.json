@@ -1,0 +1,20 @@
+[
+  {"slot": 0, "unlock": {"star": 1}},
+  {"slot": 1, "unlock": {"star": 1}},
+  {"slot": 2, "unlock": {"star": 1}},
+  {"slot": 3, "unlock": {"star": 1}},
+  {"slot": 4, "unlock": {"star": 1}},
+  {"slot": 5, "unlock": {"star": 1}},
+  {"slot": 6, "unlock": {"star": 2}},
+  {"slot": 7, "unlock": {"star": 2}},
+  {"slot": 8, "unlock": {"star": 2}},
+  {"slot": 9, "unlock": {"star": 2}},
+  {"slot": 10, "unlock": {"star": 3}},
+  {"slot": 11, "unlock": {"star": 3}},
+  {"slot": 12, "unlock": {"star": 3}},
+  {"slot": 13, "unlock": {"star": 3}},
+  {"slot": 14, "unlock": {"star": 4}},
+  {"slot": 15, "unlock": {"star": 4}},
+  {"slot": 16, "unlock": {"star": 5}},
+  {"slot": 17, "unlock": {"star": 5}}
+]

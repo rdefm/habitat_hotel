@@ -12,7 +12,7 @@ const DEFAULT_CSV_PATH := OUTPUT_DIR + "/batch_report.csv"
 const CSV_COLUMNS := [
 	"day", "cash_start", "cash_end", "cash_delta", "hearts", "reputation",
 	"occupancy_rate", "arrivals", "matched_strict", "matched_mismatched",
-	"walked_away_mismatch", "walked_away_full", "checkouts",
+	"walked_away_mismatch", "walked_away_full", "walked_away_too_expensive", "checkouts",
 	"positive_reviews", "neutral_reviews", "negative_reviews",
 	"avg_satisfaction", "upkeep_cost", "wage_cost",
 ]

@@ -13,3 +13,5 @@ signal clock_paused_changed(is_paused: bool)
 signal clock_speed_changed(speed: int)
 
 signal day_summary(summary: Dictionary)
+signal review_posted(review: Dictionary)
+signal forecast_ready(for_day: int, arrivals: Array)

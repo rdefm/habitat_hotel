@@ -32,6 +32,8 @@ static func compute(arrival: Dictionary, room_type: Dictionary, hotel_amenities:
 			score += float(s["amenity_bonus"])
 			break
 
+	score += float(room_type.get("satisfaction_bonus", 0))
+
 	return clampf(score, float(s["min"]), float(s["max"]))
 
 

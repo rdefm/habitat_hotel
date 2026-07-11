@@ -8,7 +8,24 @@
     "base_rate": 40,
     "capacity": 2,
     "unlock": {"star": 1},
-    "upgrades": []
+    "upgrades": [
+      {
+        "id": "extra_bedding",
+        "name": "Extra Bedding",
+        "description": "Squeeze in one more guest.",
+        "capacity_delta": 1,
+        "cost_cash": 400,
+        "cost_hearts": 5
+      },
+      {
+        "id": "insulated_walls",
+        "name": "Insulated Walls",
+        "description": "Cuts daily upkeep.",
+        "upkeep_delta": -5,
+        "cost_cash": 500,
+        "cost_hearts": 5
+      }
+    ]
   },
   {
     "id": "roost_loft",
@@ -19,7 +36,24 @@
     "base_rate": 35,
     "capacity": 4,
     "unlock": {"star": 1},
-    "upgrades": []
+    "upgrades": [
+      {
+        "id": "wider_perches",
+        "name": "Wider Perches",
+        "description": "Room for a bigger flock.",
+        "capacity_delta": 2,
+        "cost_cash": 600,
+        "cost_hearts": 8
+      },
+      {
+        "id": "draft_proofing",
+        "name": "Draft Proofing",
+        "description": "Cuts daily upkeep.",
+        "upkeep_delta": -5,
+        "cost_cash": 500,
+        "cost_hearts": 5
+      }
+    ]
   },
   {
     "id": "lagoon_room",
@@ -30,7 +64,24 @@
     "base_rate": 60,
     "capacity": 3,
     "unlock": {"star": 1},
-    "upgrades": []
+    "upgrades": [
+      {
+        "id": "heated_filtration",
+        "name": "Heated Filtration",
+        "description": "Cleaner, warmer water noticeably improves guest satisfaction.",
+        "satisfaction_bonus": 8,
+        "cost_cash": 700,
+        "cost_hearts": 10
+      },
+      {
+        "id": "soundproofing",
+        "name": "Soundproofing",
+        "description": "Adds a quiet atmosphere, pleasing quiet-loving guests.",
+        "adds_tag": "quiet",
+        "cost_cash": 800,
+        "cost_hearts": 15
+      }
+    ]
   },
   {
     "id": "ice_grotto",
@@ -42,7 +93,22 @@
     "capacity": 4,
     "unlock": {"star": 2},
     "upgrades": [
-      {"id": "soundproofing", "adds_tag": "quiet", "cost_hearts": 15, "cost_cash": 800}
+      {
+        "id": "soundproofing",
+        "name": "Soundproofing",
+        "description": "Adds a quiet atmosphere, pleasing quiet-loving guests.",
+        "adds_tag": "quiet",
+        "cost_cash": 800,
+        "cost_hearts": 15
+      },
+      {
+        "id": "insulated_walls",
+        "name": "Insulated Walls",
+        "description": "Cuts daily upkeep.",
+        "upkeep_delta": -8,
+        "cost_cash": 900,
+        "cost_hearts": 10
+      }
     ]
   },
   {
@@ -54,7 +120,16 @@
     "base_rate": 150,
     "capacity": 3,
     "unlock": {"star": 3},
-    "upgrades": []
+    "upgrades": [
+      {
+        "id": "reinforced_beams",
+        "name": "Reinforced Beams",
+        "description": "Room for one more guest.",
+        "capacity_delta": 1,
+        "cost_cash": 1200,
+        "cost_hearts": 10
+      }
+    ]
   },
   {
     "id": "tundra_hall",
@@ -65,6 +140,15 @@
     "base_rate": 180,
     "capacity": 2,
     "unlock": {"star": 3},
-    "upgrades": []
+    "upgrades": [
+      {
+        "id": "extra_windbreak",
+        "name": "Extra Windbreak",
+        "description": "Cuts daily upkeep.",
+        "upkeep_delta": -10,
+        "cost_cash": 1000,
+        "cost_hearts": 10
+      }
+    ]
   }
 ]

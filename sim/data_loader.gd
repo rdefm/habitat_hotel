@@ -28,6 +28,7 @@ static func load_all() -> Dictionary:
 	var seasons := load_seasons(tags)
 	var balance := load_balance()
 	var starting_hotel := load_starting_hotel(rooms)
+	var slot_layout := load_slot_layout()
 	return {
 		"tags": tags,
 		"species": species,
@@ -36,6 +37,7 @@ static func load_all() -> Dictionary:
 		"seasons": seasons,
 		"balance": balance,
 		"starting_hotel": starting_hotel,
+		"slot_layout": slot_layout,
 	}
 
 
@@ -135,16 +137,31 @@ static func _validate_room(entry: Dictionary, valid_tags: Dictionary) -> bool:
 	return true
 
 
+const ROOM_UPGRADE_EFFECT_FIELDS := ["adds_tag", "upkeep_delta", "capacity_delta", "satisfaction_bonus"]
+
+
+## Upgrades are per-instance modifiers, not per-instance rooms: id/name/
+## description/costs are required; at least one effect field (adds_tag,
+## upkeep_delta, capacity_delta, satisfaction_bonus) must be present, but
+## all are individually optional so an upgrade can mix and match effects.
 static func _validate_room_upgrade(room_id: String, upgrade: Variant, valid_tags: Dictionary) -> bool:
 	if not (upgrade is Dictionary):
 		push_error("[DataLoader] room '%s' has a non-object upgrade entry" % room_id)
 		return false
-	for field in ["id", "adds_tag", "cost_hearts", "cost_cash"]:
+	for field in ["id", "name", "description", "cost_hearts", "cost_cash"]:
 		if not upgrade.has(field):
 			push_error("[DataLoader] room '%s' upgrade missing '%s': %s" % [room_id, field, JSON.stringify(upgrade)])
 			return false
-	if not valid_tags.has(upgrade["adds_tag"]):
+	if upgrade.has("adds_tag") and not valid_tags.has(upgrade["adds_tag"]):
 		push_error("[DataLoader] room '%s' upgrade '%s' adds unknown tag '%s'" % [room_id, upgrade["id"], upgrade["adds_tag"]])
+		return false
+	var has_effect := false
+	for field in ROOM_UPGRADE_EFFECT_FIELDS:
+		if upgrade.has(field):
+			has_effect = true
+			break
+	if not has_effect:
+		push_error("[DataLoader] room '%s' upgrade '%s' has no effect fields (%s)" % [room_id, upgrade["id"], ROOM_UPGRADE_EFFECT_FIELDS])
 		return false
 	return true
 
@@ -206,6 +223,7 @@ const BALANCE_REQUIRED_SECTIONS := {
 	"hearts": ["threshold", "step", "max"],
 	"demand": ["base_min", "base_max", "reputation_weight_min", "reputation_weight_max"],
 	"costs": ["staff_wage_per_day"],
+	"pricing": ["min_multiplier", "max_multiplier", "step", "default_multiplier", "tolerance"],
 }
 
 
@@ -247,5 +265,30 @@ static func _validate_starting_room(entry: Dictionary, valid_rooms: Dictionary) 
 			return false
 	if not valid_rooms.has(entry["room_type_id"]):
 		push_error("[DataLoader] starting_hotel references unknown room type '%s'" % entry["room_type_id"])
+		return false
+	return true
+
+
+static func load_slot_layout() -> Array:
+	var raw: Variant = _read_json("slot_layout.json")
+	var out := []
+	if raw == null:
+		return out
+	if not (raw is Array):
+		push_error("[DataLoader] slot_layout.json must be a JSON array of objects")
+		return out
+	for entry in raw:
+		if entry is Dictionary and _validate_slot(entry):
+			out.append(entry)
+	return out
+
+
+static func _validate_slot(entry: Dictionary) -> bool:
+	for field in ["slot", "unlock"]:
+		if not entry.has(field):
+			push_error("[DataLoader] slot_layout entry missing '%s': %s" % [field, JSON.stringify(entry)])
+			return false
+	if not (entry["unlock"] is Dictionary and entry["unlock"].has("star")):
+		push_error("[DataLoader] slot_layout entry %d unlock must be an object with a 'star' field" % int(entry["slot"]))
 		return false
 	return true

@@ -18,6 +18,13 @@ var _pending_arrivals: Array = []
 var _ready_for_checkout: Array = []
 var _day_metrics: Dictionary = {}
 
+# Tomorrow's arrivals, generated a phase early (at tonight's Night phase) so
+# the player has a real window to react before they're matched. Day 1 has no
+# "last night" to generate from, so _do_morning falls back to generating on
+# the spot exactly once, when _has_forecast is still false.
+var _next_day_forecast: Array = []
+var _has_forecast: bool = false
+
 
 func _ready() -> void:
 	EventBus.phase_changed.connect(_on_phase_changed)
@@ -31,6 +38,8 @@ func reset() -> void:
 	_pending_arrivals.clear()
 	_ready_for_checkout.clear()
 	_day_metrics = {}
+	_next_day_forecast.clear()
+	_has_forecast = false
 
 
 func _on_phase_changed(day: int, phase_name: String) -> void:
@@ -58,23 +67,38 @@ func _do_morning(day: int) -> void:
 		"matched_mismatched": 0,
 		"walked_away_mismatch": 0,
 		"walked_away_full": 0,
+		"walked_away_too_expensive": 0,
 		"checkouts": 0,
 		"positive_reviews": 0,
 		"neutral_reviews": 0,
 		"negative_reviews": 0,
+		"arrival_species": {},
+		"turned_away_species": {},
 	}
 
 	for gid in _ready_for_checkout:
 		_checkout_guest(gid)
 	_ready_for_checkout.clear()
 
-	_pending_arrivals = DemandGenerator.generate(GameState, Rng)
+	if _has_forecast:
+		_pending_arrivals = _next_day_forecast
+		_next_day_forecast = []
+		_has_forecast = false
+	else:
+		# Day 1 only -- every later day's arrivals were already forecast last Night.
+		_pending_arrivals = DemandGenerator.generate(GameState, Rng)
+
 	_day_metrics["arrivals"] = _pending_arrivals.size()
+	for arrival in _pending_arrivals:
+		var species_id: String = arrival["species_id"]
+		_day_metrics["arrival_species"][species_id] = int(_day_metrics["arrival_species"].get(species_id, 0)) + 1
 
 
 func _do_midday(_day: int) -> void:
+	var pricing_balance: Dictionary = GameState.balance.get("pricing", {})
+	var room_stats_by_slot := _effective_stats_by_slot()
 	for arrival in _pending_arrivals:
-		var decision := Matcher.decide(arrival, GameState.hotel_rooms, GameState.rooms, GameState.matcher_policy)
+		var decision := Matcher.decide(arrival, GameState.hotel_rooms, room_stats_by_slot, GameState.matcher_policy, GameState.price_multipliers, pricing_balance)
 		match decision["reason"]:
 			"matched_strict":
 				_admit_guest(arrival, decision["room_slot_index"], false)
@@ -87,22 +111,43 @@ func _do_midday(_day: int) -> void:
 				# a real service failure, so it stings reputation.
 				GameState.reputation = clampi(GameState.reputation + int(GameState.balance["review"]["reputation_delta_walkaway"]), 0, 100)
 				_day_metrics["walked_away_mismatch"] += 1
+				_track_turned_away(arrival)
 			"fully_booked":
 				# Turned away only because every room is occupied -- being sold out isn't
 				# a service failure, so this doesn't cost reputation.
 				_day_metrics["walked_away_full"] += 1
+				_track_turned_away(arrival)
+			"too_expensive":
+				# Turned away by the player's own pricing choice -- a lost sale, not a
+				# service failure, so this doesn't cost reputation either.
+				_day_metrics["walked_away_too_expensive"] += 1
+				_track_turned_away(arrival)
 	_pending_arrivals.clear()
+
+
+func _track_turned_away(arrival: Dictionary) -> void:
+	var species_id: String = arrival["species_id"]
+	_day_metrics["turned_away_species"][species_id] = int(_day_metrics["turned_away_species"].get(species_id, 0)) + 1
+
+
+## Base room type stats merged with each instance's purchased upgrades,
+## keyed by slot index. Computed fresh each Midday/Night since upgrades can
+## be bought between phases while the clock is paused for a menu.
+func _effective_stats_by_slot() -> Dictionary:
+	var out: Dictionary = {}
+	for room in GameState.hotel_rooms:
+		out[room["slot"]] = GameState.effective_room_stats(room)
+	return out
 
 
 func _do_evening(_day: int) -> void:
 	pass # Meals/incidents arrive in Chunk 5; care-per-night is already folded into match-time satisfaction.
 
 
-func _do_night(_day: int) -> void:
+func _do_night(day: int) -> void:
 	var upkeep := 0
 	for room in GameState.hotel_rooms:
-		var room_type: Dictionary = GameState.rooms[room["room_type_id"]]
-		upkeep += int(room_type["upkeep_per_day"])
+		upkeep += int(GameState.effective_room_stats(room)["upkeep_per_day"])
 	var wage := int(GameState.balance["costs"]["staff_wage_per_day"])
 	GameState.cash -= (upkeep + wage)
 	_day_metrics["upkeep_cost"] = upkeep
@@ -132,11 +177,15 @@ func _do_night(_day: int) -> void:
 
 	EventBus.day_summary.emit(_day_metrics.duplicate())
 
+	_next_day_forecast = DemandGenerator.generate(GameState, Rng)
+	_has_forecast = true
+	EventBus.forecast_ready.emit(day + 1, _next_day_forecast.duplicate())
+
 
 func _admit_guest(arrival: Dictionary, room_slot_index: int, mismatch: bool) -> void:
 	var room: Dictionary = GameState.hotel_rooms[room_slot_index]
-	var room_type: Dictionary = GameState.rooms[room["room_type_id"]]
-	var sat := Satisfaction.compute(arrival, room_type, GameState.hotel_amenities, GameState.balance)
+	var room_stats := GameState.effective_room_stats(room)
+	var sat := Satisfaction.compute(arrival, room_stats, GameState.hotel_amenities, GameState.balance)
 
 	var gid := _next_guest_id
 	_next_guest_id += 1
@@ -159,9 +208,11 @@ func _checkout_guest(gid: int) -> void:
 		return
 	var g: Dictionary = guests[gid]
 	var room: Dictionary = GameState.hotel_rooms[g["room_slot_index"]]
-	var room_type: Dictionary = GameState.rooms[room["room_type_id"]]
+	var room_stats := GameState.effective_room_stats(room)
+	var species: Dictionary = GameState.species[g["species_id"]]
 
-	var revenue: int = int(room_type["base_rate"]) * int(g["nights_total"])
+	var nightly_rate: float = float(room_stats["base_rate"]) * GameState.price_multiplier_for(room["room_type_id"])
+	var revenue: int = int(round(nightly_rate * int(g["nights_total"])))
 	GameState.cash += revenue
 
 	var sat: float = g["satisfaction"]
@@ -176,6 +227,18 @@ func _checkout_guest(gid: int) -> void:
 			_day_metrics["negative_reviews"] += 1
 		_:
 			_day_metrics["neutral_reviews"] += 1
+
+	var flavor_lines: Array = species.get("flavor_lines", [])
+	var flavor_line: String = flavor_lines[Rng.randi_range(0, flavor_lines.size() - 1)] if not flavor_lines.is_empty() else ""
+	EventBus.review_posted.emit({
+		"day": GameState.day,
+		"species_id": g["species_id"],
+		"species_name": species["name"],
+		"review": review,
+		"satisfaction": sat,
+		"revenue": revenue,
+		"flavor_line": flavor_line,
+	})
 
 	room["occupant"] = null
 	guests.erase(gid)
