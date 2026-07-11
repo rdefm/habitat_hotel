@@ -1,0 +1,25 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly, since the parameters
+; that go here are meant to be edited by the editor.
+
+config_version=5
+
+[application]
+
+config/name="Grand Safari Hotel"
+config/features=PackedStringArray("4.7")
+run/main_scene="res://main.tscn"
+
+[autoload]
+
+EventBus="*res://autoload/event_bus.gd"
+Rng="*res://autoload/rng_service.gd"
+Clock="*res://autoload/clock.gd"
+SaveManager="*res://autoload/save_manager.gd"
+GameState="*res://autoload/game_state.gd"
+Sim="*res://autoload/sim_controller.gd"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -1,0 +1,27 @@
+[
+  {
+    "id": "snack_thief",
+    "name": "Snack Thief",
+    "description": "Pilfers a little cash from the kitchen budget most days, but guests find it charming."
+  },
+  {
+    "id": "crowd_pleaser",
+    "name": "Crowd Pleaser",
+    "description": "A natural showoff who lifts the mood of everyone nearby."
+  },
+  {
+    "id": "night_owl",
+    "name": "Night Owl",
+    "description": "Comes alive after dark and does their best work in the evening phase."
+  },
+  {
+    "id": "shed_everywhere",
+    "name": "Sheds Everywhere",
+    "description": "Leaves fur/feathers/scales in their wake, adding to the housekeeping load."
+  },
+  {
+    "id": "early_riser",
+    "name": "Early Riser",
+    "description": "First one on shift every morning, no matter what."
+  }
+]

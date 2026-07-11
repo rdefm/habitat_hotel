@@ -1,0 +1,122 @@
+[
+  {
+    "id": "pigeon",
+    "name": "Pigeon",
+    "tier": 1,
+    "needs": ["high_perch"],
+    "likes": [],
+    "budget": "low",
+    "party_size": [1, 6],
+    "base_stay_days": [1, 2],
+    "amenity_prefs": ["perch_garden"],
+    "flavor_lines": [
+      "Cooing intensifies.",
+      "Left a little gift on the balcony rail."
+    ]
+  },
+  {
+    "id": "capybara",
+    "name": "Capybara",
+    "tier": 1,
+    "needs": ["warm", "water"],
+    "likes": ["quiet"],
+    "budget": "low",
+    "party_size": [1, 3],
+    "base_stay_days": [2, 4],
+    "amenity_prefs": ["pool"],
+    "flavor_lines": [
+      "Utterly unbothered by anything.",
+      "Just here to soak, thanks."
+    ]
+  },
+  {
+    "id": "tortoise",
+    "name": "Tortoise",
+    "tier": 1,
+    "needs": ["warm", "dry"],
+    "likes": ["quiet"],
+    "budget": "low",
+    "party_size": [1, 1],
+    "base_stay_days": [3, 6],
+    "amenity_prefs": [],
+    "flavor_lines": [
+      "Slow check-in. Slower checkout.",
+      "Requests the quietest room, obviously."
+    ]
+  },
+  {
+    "id": "penguin",
+    "name": "Penguin",
+    "tier": 2,
+    "needs": ["cold", "water"],
+    "likes": ["quiet"],
+    "budget": "mid",
+    "party_size": [1, 4],
+    "base_stay_days": [1, 3],
+    "amenity_prefs": ["pool"],
+    "flavor_lines": [
+      "Waddled all the way here.",
+      "The ice machine better be REAL ice."
+    ]
+  },
+  {
+    "id": "flamingo",
+    "name": "Flamingo",
+    "tier": 2,
+    "needs": ["warm", "water"],
+    "likes": ["spacious"],
+    "budget": "mid",
+    "party_size": [2, 6],
+    "base_stay_days": [1, 2],
+    "amenity_prefs": ["pool"],
+    "flavor_lines": [
+      "Insists on standing the entire stay.",
+      "Asks if the wedding package is available."
+    ]
+  },
+  {
+    "id": "bat",
+    "name": "Bat",
+    "tier": 3,
+    "needs": ["dark", "high_perch"],
+    "likes": ["quiet"],
+    "budget": "mid",
+    "party_size": [1, 8],
+    "base_stay_days": [1, 2],
+    "amenity_prefs": [],
+    "flavor_lines": [
+      "Only checks in after sundown.",
+      "Hangs from literally everything."
+    ]
+  },
+  {
+    "id": "polar_bear",
+    "name": "Polar Bear",
+    "tier": 3,
+    "needs": ["cold", "spacious"],
+    "likes": ["water"],
+    "budget": "high",
+    "party_size": [1, 2],
+    "base_stay_days": [2, 5],
+    "amenity_prefs": ["pool"],
+    "flavor_lines": [
+      "Requires a very sturdy bed.",
+      "Politely asks the chef for more fish."
+    ]
+  },
+  {
+    "id": "snow_leopard",
+    "name": "Snow Leopard",
+    "tier": 4,
+    "needs": ["cold", "high_perch", "quiet"],
+    "likes": ["spacious"],
+    "budget": "high",
+    "party_size": [1, 1],
+    "base_stay_days": [3, 7],
+    "amenity_prefs": [],
+    "flavor_lines": [
+      "Prefers not to be seen.",
+      "The most exclusive guest on the roster."
+    ]
+  }
+]
