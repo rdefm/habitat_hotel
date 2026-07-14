@@ -13,6 +13,7 @@ const StaffMenu = preload("res://ui/staff_menu.gd")
 const ReportsMenu = preload("res://ui/reports_menu.gd")
 const ReviewsMenu = preload("res://ui/reviews_menu.gd")
 const UpgradeMenu = preload("res://ui/upgrade_menu.gd")
+const PolicyMenu = preload("res://ui/policy_menu.gd")
 const DemandFormat = preload("res://ui/demand_format.gd")
 
 const DAY_LOG_MAX_LINES := 200
@@ -140,6 +141,7 @@ func _build_menu_bar() -> HBoxContainer:
 		["Staff", func(): return StaffMenu.new()],
 		["Reports", func(): return ReportsMenu.new()],
 		["Reviews", func(): return ReviewsMenu.new()],
+		["Policy", func(): return PolicyMenu.new()],
 	]
 	for entry in entries:
 		var label: String = entry[0]
