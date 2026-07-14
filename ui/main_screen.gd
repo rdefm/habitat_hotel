@@ -14,6 +14,7 @@ const ReportsMenu = preload("res://ui/reports_menu.gd")
 const ReviewsMenu = preload("res://ui/reviews_menu.gd")
 const UpgradeMenu = preload("res://ui/upgrade_menu.gd")
 const PolicyMenu = preload("res://ui/policy_menu.gd")
+const LobbyView = preload("res://ui/lobby_view.gd")
 const DemandFormat = preload("res://ui/demand_format.gd")
 
 const DAY_LOG_MAX_LINES := 200
@@ -46,6 +47,7 @@ func _ready() -> void:
 
 	root.add_child(_build_top_bar())
 	root.add_child(_build_menu_bar())
+	root.add_child(LobbyView.new())
 
 	var middle := HBoxContainer.new()
 	middle.size_flags_vertical = Control.SIZE_EXPAND_FILL

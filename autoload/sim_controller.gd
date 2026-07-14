@@ -112,16 +112,19 @@ func _do_midday(_day: int) -> void:
 				GameState.reputation = clampi(GameState.reputation + int(GameState.balance["review"]["reputation_delta_walkaway"]), 0, 100)
 				_day_metrics["walked_away_mismatch"] += 1
 				_track_turned_away(arrival)
+				EventBus.guest_turned_away.emit(arrival["name"], arrival["species_id"], decision["reason"])
 			"fully_booked":
 				# Turned away only because every room is occupied -- being sold out isn't
 				# a service failure, so this doesn't cost reputation.
 				_day_metrics["walked_away_full"] += 1
 				_track_turned_away(arrival)
+				EventBus.guest_turned_away.emit(arrival["name"], arrival["species_id"], decision["reason"])
 			"too_expensive":
 				# Turned away by the player's own pricing choice -- a lost sale, not a
 				# service failure, so this doesn't cost reputation either.
 				_day_metrics["walked_away_too_expensive"] += 1
 				_track_turned_away(arrival)
+				EventBus.guest_turned_away.emit(arrival["name"], arrival["species_id"], decision["reason"])
 	_pending_arrivals.clear()
 
 
@@ -204,6 +207,7 @@ func _admit_guest(arrival: Dictionary, room_slot_index: int, mismatch: bool) -> 
 	room["occupant_name"] = arrival["name"]
 	room["occupant_species_id"] = arrival["species_id"]
 	room["occupant_mismatch"] = mismatch
+	EventBus.guest_seated.emit(arrival["name"], arrival["species_id"], room_slot_index, mismatch)
 
 
 func _checkout_guest(gid: int) -> void:
@@ -244,6 +248,8 @@ func _checkout_guest(gid: int) -> void:
 		"revenue": revenue,
 		"flavor_line": flavor_line,
 	})
+
+	EventBus.guest_checked_out.emit(g["name"], g["species_id"], g["room_slot_index"])
 
 	room["occupant"] = null
 	room["occupant_name"] = null
