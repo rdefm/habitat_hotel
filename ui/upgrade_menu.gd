@@ -95,10 +95,11 @@ func _refresh() -> void:
 	var stats := GameState.effective_room_stats(room)
 	var occupant_line := "Vacant"
 	if room["occupant"] != null:
+		var guest_name: String = room.get("occupant_name", "") if room.get("occupant_name", "") else "Guest"
 		var species_id: String = room.get("occupant_species_id", "")
 		var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
 		var mismatch: bool = room.get("occupant_mismatch", false)
-		occupant_line = "Occupied by %s -- %s" % [species_name, ("mismatch" if mismatch else "perfect fit")]
+		occupant_line = "Occupied by %s the %s -- %s" % [guest_name, species_name, ("mismatch" if mismatch else "perfect fit")]
 	_stats_label.text = "%s (slot %d)\ntags=%s  capacity=%d  upkeep=%d/day%s\n%s" % [
 		base["name"], slot_index, stats["tags"], int(stats["capacity"]), int(stats["upkeep_per_day"]),
 		("  satisfaction +%d" % int(stats["satisfaction_bonus"])) if float(stats.get("satisfaction_bonus", 0)) != 0.0 else "",

@@ -25,6 +25,8 @@ static func generate(game_state: Node, rng: Node) -> Array:
 	var rep_factor: float = lerpf(float(demand["reputation_weight_min"]), float(demand["reputation_weight_max"]), rep_fraction)
 	var count: int = maxi(0, int(round(base_count * rep_factor)))
 
+	var names: Dictionary = game_state.names
+
 	var arrivals: Array = []
 	for i in range(count):
 		var s: Dictionary = _weighted_pick(eligible, tag_weights, rng)
@@ -38,8 +40,23 @@ static func generate(game_state: Node, rng: Node) -> Array:
 			"budget": s["budget"],
 			"party_size": party_size,
 			"nights_total": nights,
+			"name": _pick_name(s["id"], names, rng),
 		})
 	return arrivals
+
+
+## Equal chance of drawing from the general pool or this species' own pool;
+## falls back to general if the species has no pool (or it's empty).
+static func _pick_name(species_id: String, names: Dictionary, rng: Node) -> String:
+	var general: Array = names.get("general", [])
+	var species_pool: Array = names.get("species", {}).get(species_id, [])
+
+	var pool := general
+	if not species_pool.is_empty() and rng.randf() < 0.5:
+		pool = species_pool
+	if pool.is_empty():
+		return "Guest"
+	return pool[rng.randi_range(0, pool.size() - 1)]
 
 
 static func _weighted_pick(list: Array, tag_weights: Dictionary, rng: Node) -> Dictionary:

@@ -11,7 +11,7 @@ extends GridContainer
 signal slot_selected(slot_index: int)
 
 const COLUMNS := 6
-const CELL_MIN_SIZE := Vector2(110, 72)
+const CELL_MIN_SIZE := Vector2(110, 88)
 
 @export var interactive: bool = false
 
@@ -57,10 +57,12 @@ func refresh() -> void:
 			btn.text = "Slot %d\n[locked]" % slot_index
 			btn.disabled = true
 			btn.modulate = Color(0.5, 0.5, 0.5)
+			btn.tooltip_text = ""
 		elif room.is_empty():
 			btn.text = "Slot %d\n(empty)" % slot_index
 			btn.disabled = not interactive
 			btn.modulate = Color(1, 1, 1)
+			btn.tooltip_text = ""
 		else:
 			var room_type: Dictionary = GameState.rooms[room["room_type_id"]]
 			var occupied := room["occupant"] != null
@@ -68,17 +70,22 @@ func refresh() -> void:
 			var suffix := " ^%d" % upgrade_count if upgrade_count > 0 else ""
 			var occupant_line := ""
 			var modulate_color := Color(0.85, 0.95, 1.0)
+			var tooltip := ""
 
 			if occupied:
+				var guest_name: String = room.get("occupant_name", "") if room.get("occupant_name", "") else "Guest"
 				var species_id: String = room.get("occupant_species_id", "")
 				var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
 				var mismatch: bool = room.get("occupant_mismatch", false)
-				occupant_line = "\n%s%s" % [species_name, (" (mismatch)" if mismatch else " (perfect fit)")]
+				var fit_text := "mismatch" if mismatch else "perfect fit"
+				occupant_line = "\n%s\n%s (%s)" % [guest_name, species_name, fit_text]
 				modulate_color = Color(1.0, 0.85, 0.5) if mismatch else Color(0.75, 1.0, 0.75)
+				tooltip = "%s the %s -- %s" % [guest_name, species_name, fit_text]
 
 			btn.text = "Slot %d\n%s%s%s" % [slot_index, room_type["name"], suffix, occupant_line]
 			btn.disabled = not interactive
 			btn.modulate = modulate_color
+			btn.tooltip_text = tooltip
 
 
 func _on_cell_pressed(slot_index: int) -> void:

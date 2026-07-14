@@ -23,8 +23,9 @@ func _ready() -> void:
 	for i in range(history.size() - 1, -1, -1):
 		var review: Dictionary = history[i]
 		var color: Color = {"positive": Color(0.5, 1, 0.5), "negative": Color(1, 0.5, 0.5)}.get(review["review"], Color(0.85, 0.85, 0.85))
-		list.add_child(_line("Day %d -- %s (%s, %+d cash, satisfaction %.0f)" % [
-			review["day"], review["species_name"], review["review"], review["revenue"], review["satisfaction"],
+		var guest_name: String = review.get("guest_name", "") if review.get("guest_name", "") else "Guest"
+		list.add_child(_line("Day %d -- %s the %s (%s, %+d cash, satisfaction %.0f)" % [
+			review["day"], guest_name, review["species_name"], review["review"], review["revenue"], review["satisfaction"],
 		], color))
 		list.add_child(_line("  \"%s\"" % review["flavor_line"], color))
 

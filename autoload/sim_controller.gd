@@ -191,6 +191,7 @@ func _admit_guest(arrival: Dictionary, room_slot_index: int, mismatch: bool) -> 
 	_next_guest_id += 1
 	guests[gid] = {
 		"id": gid,
+		"name": arrival["name"],
 		"species_id": arrival["species_id"],
 		"party_size": arrival["party_size"],
 		"nights_total": arrival["nights_total"],
@@ -200,6 +201,7 @@ func _admit_guest(arrival: Dictionary, room_slot_index: int, mismatch: bool) -> 
 		"mismatch": mismatch,
 	}
 	room["occupant"] = gid
+	room["occupant_name"] = arrival["name"]
 	room["occupant_species_id"] = arrival["species_id"]
 	room["occupant_mismatch"] = mismatch
 
@@ -234,6 +236,7 @@ func _checkout_guest(gid: int) -> void:
 	var flavor_line: String = flavor_lines[Rng.randi_range(0, flavor_lines.size() - 1)] if not flavor_lines.is_empty() else ""
 	EventBus.review_posted.emit({
 		"day": GameState.day,
+		"guest_name": g["name"],
 		"species_id": g["species_id"],
 		"species_name": species["name"],
 		"review": review,
@@ -243,6 +246,7 @@ func _checkout_guest(gid: int) -> void:
 	})
 
 	room["occupant"] = null
+	room["occupant_name"] = null
 	room["occupant_species_id"] = null
 	room["occupant_mismatch"] = false
 	guests.erase(gid)

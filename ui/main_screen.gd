@@ -199,8 +199,9 @@ func _on_day_summary(summary: Dictionary) -> void:
 
 func _on_review_posted(review: Dictionary) -> void:
 	var color: String = {"positive": "green", "negative": "red"}.get(review["review"], "gray")
-	_log("  [color=%s]%s[/color] (%s, %+d cash) -- \"%s\"" % [
-		color, review["species_name"], review["review"], review["revenue"], review["flavor_line"],
+	var guest_name: String = review.get("guest_name", "") if review.get("guest_name", "") else "Guest"
+	_log("  [color=%s]%s the %s[/color] (%s, %+d cash) -- \"%s\"" % [
+		color, guest_name, review["species_name"], review["review"], review["revenue"], review["flavor_line"],
 	])
 
 

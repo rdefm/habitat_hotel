@@ -29,6 +29,7 @@ var rooms: Dictionary = {}
 var traits: Dictionary = {}
 var seasons: Dictionary = {}
 var balance: Dictionary = {}
+var names: Dictionary = {}
 var slot_layout: Array = []
 var _starting_hotel_template: Array = []
 
@@ -75,6 +76,7 @@ func _load_data() -> void:
 	balance = data["balance"]
 	_starting_hotel_template = data["starting_hotel"]
 	slot_layout = data["slot_layout"]
+	names = data["names"]
 	EventBus.data_loaded.emit()
 
 
@@ -119,6 +121,7 @@ func _build_starting_hotel() -> void:
 			"slot": entry["slot"],
 			"room_type_id": entry["room_type_id"],
 			"occupant": null,
+			"occupant_name": null,
 			"occupant_species_id": null,
 			"occupant_mismatch": false,
 			"upgrades": [],
@@ -172,7 +175,7 @@ func build_room(slot_index: int, room_type_id: String) -> bool:
 	if cash < cost:
 		return false
 	cash -= cost
-	hotel_rooms.append({"slot": slot_index, "room_type_id": room_type_id, "occupant": null, "occupant_species_id": null, "occupant_mismatch": false, "upgrades": []})
+	hotel_rooms.append({"slot": slot_index, "room_type_id": room_type_id, "occupant": null, "occupant_name": null, "occupant_species_id": null, "occupant_mismatch": false, "upgrades": []})
 	return true
 
 

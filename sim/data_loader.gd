@@ -29,6 +29,7 @@ static func load_all() -> Dictionary:
 	var balance := load_balance()
 	var starting_hotel := load_starting_hotel(rooms)
 	var slot_layout := load_slot_layout()
+	var names := load_names(species)
 	return {
 		"tags": tags,
 		"species": species,
@@ -38,6 +39,7 @@ static func load_all() -> Dictionary:
 		"balance": balance,
 		"starting_hotel": starting_hotel,
 		"slot_layout": slot_layout,
+		"names": names,
 	}
 
 
@@ -292,3 +294,50 @@ static func _validate_slot(entry: Dictionary) -> bool:
 		push_error("[DataLoader] slot_layout entry %d unlock must be an object with a 'star' field" % int(entry["slot"]))
 		return false
 	return true
+
+
+## Guest name pools: a "general" list any species can draw from, plus
+## optional per-species lists. DemandGenerator picks 50/50 between the
+## general pool and the arriving guest's species pool (falling back to
+## general if that species has no list of its own).
+static func load_names(valid_species: Dictionary) -> Dictionary:
+	var out := {"general": [], "species": {}}
+	var raw: Variant = _read_json("names.json")
+	if raw == null:
+		return out
+	if not (raw is Dictionary):
+		push_error("[DataLoader] names.json must be a JSON object")
+		return out
+
+	var general: Variant = raw.get("general", [])
+	if not (general is Array):
+		push_error("[DataLoader] names.json 'general' must be an array of strings")
+	else:
+		out["general"] = _clean_name_list(general, "general")
+	if out["general"].is_empty():
+		push_error("[DataLoader] names.json 'general' must contain at least one name")
+
+	var species_lists: Variant = raw.get("species", {})
+	if not (species_lists is Dictionary):
+		push_error("[DataLoader] names.json 'species' must be an object of species_id -> array")
+		return out
+	for species_id in species_lists.keys():
+		if not valid_species.has(species_id):
+			push_error("[DataLoader] names.json 'species' references unknown species '%s'" % species_id)
+			continue
+		var list: Variant = species_lists[species_id]
+		if not (list is Array):
+			push_error("[DataLoader] names.json 'species.%s' must be an array of strings" % species_id)
+			continue
+		out["species"][species_id] = _clean_name_list(list, species_id)
+	return out
+
+
+static func _clean_name_list(raw_list: Array, context: String) -> Array:
+	var out := []
+	for entry in raw_list:
+		if typeof(entry) != TYPE_STRING or entry.is_empty():
+			push_error("[DataLoader] names.json '%s' has a non-string/empty entry: %s" % [context, str(entry)])
+			continue
+		out.append(entry)
+	return out

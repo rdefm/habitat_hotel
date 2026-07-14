@@ -1,0 +1,40 @@
+{
+  "general": [
+    "Alex", "Jamie", "Morgan", "Riley", "Casey", "Taylor", "Jordan",
+    "Charlie", "Sam", "Robin", "Drew", "Quinn", "Avery", "Skyler", "Reese"
+  ],
+  "species": {
+    "pigeon": [
+      "Coo Turner", "Rocky Pidgeman", "Feather Locklear", "Squawk Norris",
+      "Ledge Ender", "Perry Winkle"
+    ],
+    "capybara": [
+      "Coby Barry", "Chilly Willy", "Cappy Baraiah", "Bara Cuda",
+      "Sir Soaks-a-Lot", "Zen Barry"
+    ],
+    "tortoise": [
+      "Shelldon", "Torty McSlow", "Gary the Tortoise", "Crawlford",
+      "Shellby", "Methuselah Jr."
+    ],
+    "penguin": [
+      "Waddles", "Ice Perkins", "Chilly Chaplin", "Frosty Beaks",
+      "Sir Waddlesworth", "Pingu Jr."
+    ],
+    "flamingo": [
+      "Pinky Longlegs", "Stan Ding", "Flo Mingo", "Rosy Beaklyn",
+      "Balance Beam", "Marabou Mia"
+    ],
+    "bat": [
+      "Count Flapula", "Echo Knight", "Luna Wing", "Bruce Wingne",
+      "Dusk Cobweb", "Sonar Steve"
+    ],
+    "polar_bear": [
+      "Chilly Chompers", "Frost Byte", "Sir Snowington", "Blizzard Bo",
+      "Yukon Cornelius Jr.", "Arctic Andy"
+    ],
+    "snow_leopard": [
+      "Ghost Whiskers", "Snowy Prowler", "Frost Fang", "Ice Pounce",
+      "Misty Claw", "Blizzard Blaze"
+    ]
+  }
+}
