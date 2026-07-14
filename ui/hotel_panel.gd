@@ -11,7 +11,7 @@ extends GridContainer
 signal slot_selected(slot_index: int)
 
 const COLUMNS := 6
-const CELL_MIN_SIZE := Vector2(110, 56)
+const CELL_MIN_SIZE := Vector2(110, 72)
 
 @export var interactive: bool = false
 
@@ -65,10 +65,20 @@ func refresh() -> void:
 			var room_type: Dictionary = GameState.rooms[room["room_type_id"]]
 			var occupied := room["occupant"] != null
 			var upgrade_count: int = room.get("upgrades", []).size()
-			var suffix := (" *" if occupied else "") + (" ^%d" % upgrade_count if upgrade_count > 0 else "")
-			btn.text = "Slot %d\n%s%s" % [slot_index, room_type["name"], suffix]
+			var suffix := " ^%d" % upgrade_count if upgrade_count > 0 else ""
+			var occupant_line := ""
+			var modulate_color := Color(0.85, 0.95, 1.0)
+
+			if occupied:
+				var species_id: String = room.get("occupant_species_id", "")
+				var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
+				var mismatch: bool = room.get("occupant_mismatch", false)
+				occupant_line = "\n%s%s" % [species_name, (" (mismatch)" if mismatch else " (perfect fit)")]
+				modulate_color = Color(1.0, 0.85, 0.5) if mismatch else Color(0.75, 1.0, 0.75)
+
+			btn.text = "Slot %d\n%s%s%s" % [slot_index, room_type["name"], suffix, occupant_line]
 			btn.disabled = not interactive
-			btn.modulate = Color(0.85, 1.0, 0.85) if occupied else Color(0.85, 0.95, 1.0)
+			btn.modulate = modulate_color
 
 
 func _on_cell_pressed(slot_index: int) -> void:

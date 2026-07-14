@@ -200,6 +200,8 @@ func _admit_guest(arrival: Dictionary, room_slot_index: int, mismatch: bool) -> 
 		"mismatch": mismatch,
 	}
 	room["occupant"] = gid
+	room["occupant_species_id"] = arrival["species_id"]
+	room["occupant_mismatch"] = mismatch
 
 
 func _checkout_guest(gid: int) -> void:
@@ -241,5 +243,7 @@ func _checkout_guest(gid: int) -> void:
 	})
 
 	room["occupant"] = null
+	room["occupant_species_id"] = null
+	room["occupant_mismatch"] = false
 	guests.erase(gid)
 	_day_metrics["checkouts"] += 1
