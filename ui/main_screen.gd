@@ -137,7 +137,6 @@ func _build_menu_bar() -> HBoxContainer:
 	bar.add_theme_constant_override("separation", 6)
 
 	var entries := [
-		["Build", func(): return BuildMenu.new()],
 		["Prices", func(): return PricesMenu.new()],
 		["Hire", func(): return HireMenu.new()],
 		["Staff", func(): return StaffMenu.new()],
@@ -163,7 +162,10 @@ func _on_hotel_slot_selected(slot_index: int) -> void:
 		return
 	var room := GameState.room_at_slot(slot_index)
 	if room.is_empty():
-		open_menu("Build", BuildMenu.new())
+		var menu := BuildMenu.new()
+		menu.slot_index = slot_index
+		menu.build_completed.connect(close_menu)
+		open_menu("Build (slot %d)" % slot_index, menu)
 	else:
 		var room_name: String = GameState.rooms[room["room_type_id"]]["name"]
 		var menu := UpgradeMenu.new()

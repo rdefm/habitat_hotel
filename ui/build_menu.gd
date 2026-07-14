@@ -1,36 +1,28 @@
 class_name BuildMenu
 extends VBoxContainer
 
-## Build menu: slot grid + room catalog. Pick an empty unlocked slot, then a
-## catalog entry to construct there (cash permitting). This is the sim's
-## match to "choose what to build for the demand you see."
+## Build menu: room catalog for one pre-chosen slot. Opened by tapping an
+## empty, unlocked slot on the main grid, which sets slot_index before
+## adding this to the scene -- this menu never shows a slot picker of its
+## own (see ui/main_screen.gd's _on_hotel_slot_selected). Pick a catalog
+## entry to construct there (cash permitting); this is the sim's match to
+## "choose what to build for the demand you see."
 
-const HotelPanel = preload("res://ui/hotel_panel.gd")
 const DemandFormat = preload("res://ui/demand_format.gd")
 const RECENT_DAYS_FOR_DEMAND := 5
 
-var _selected_slot: int = -1
-var _hint_label: Label
+## Set by the caller before this node enters the tree.
+var slot_index: int = -1
+
+signal build_completed
+
 var _catalog_list: VBoxContainer
-var _hotel_panel: HotelPanel
 
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(560, 460)
 
 	add_child(_build_demand_panel())
-
-	var grid_label := Label.new()
-	grid_label.text = "Pick an empty, unlocked slot:"
-	add_child(grid_label)
-
-	_hotel_panel = HotelPanel.new()
-	_hotel_panel.interactive = true
-	_hotel_panel.slot_selected.connect(_on_slot_selected)
-	add_child(_hotel_panel)
-
-	_hint_label = Label.new()
-	add_child(_hint_label)
 
 	var catalog_label := Label.new()
 	catalog_label.text = "Room catalog:"
@@ -44,7 +36,6 @@ func _ready() -> void:
 	_catalog_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_catalog_list)
 
-	_refresh_hint()
 	_refresh_catalog()
 
 
@@ -83,23 +74,6 @@ func _recent_turned_away_summary() -> String:
 	return DemandFormat.summarize_counts(totals, GameState.species)
 
 
-func _on_slot_selected(slot_index: int) -> void:
-	var unlocked := GameState.is_slot_unlocked(slot_index)
-	var occupied := not GameState.room_at_slot(slot_index).is_empty()
-	if not unlocked or occupied:
-		return
-	_selected_slot = slot_index
-	_refresh_hint()
-	_refresh_catalog()
-
-
-func _refresh_hint() -> void:
-	if _selected_slot < 0:
-		_hint_label.text = "No slot selected."
-	else:
-		_hint_label.text = "Selected slot %d. Choose a room to build below." % _selected_slot
-
-
 func _refresh_catalog() -> void:
 	for child in _catalog_list.get_children():
 		child.queue_free()
@@ -125,7 +99,7 @@ func _refresh_catalog() -> void:
 
 		var build_btn := Button.new()
 		build_btn.text = "Build (%d cash)" % int(rt["build_cost"])
-		build_btn.disabled = _selected_slot < 0 or GameState.cash < int(rt["build_cost"])
+		build_btn.disabled = GameState.cash < int(rt["build_cost"])
 		build_btn.pressed.connect(_on_build_pressed.bind(room_type_id))
 		row.add_child(build_btn)
 
@@ -133,10 +107,7 @@ func _refresh_catalog() -> void:
 
 
 func _on_build_pressed(room_type_id: String) -> void:
-	if _selected_slot < 0:
+	if not GameState.room_at_slot(slot_index).is_empty():
 		return
-	if GameState.build_room(_selected_slot, room_type_id):
-		_selected_slot = -1
-		_hotel_panel.refresh()
-		_refresh_hint()
-		_refresh_catalog()
+	if GameState.build_room(slot_index, room_type_id):
+		build_completed.emit()
