@@ -125,6 +125,7 @@ func _build_starting_hotel() -> void:
 			"occupant_species_id": null,
 			"occupant_mismatch": false,
 			"upgrades": [],
+			"needs_cleaning": false,
 		})
 
 
@@ -175,7 +176,7 @@ func build_room(slot_index: int, room_type_id: String) -> bool:
 	if cash < cost:
 		return false
 	cash -= cost
-	hotel_rooms.append({"slot": slot_index, "room_type_id": room_type_id, "occupant": null, "occupant_name": null, "occupant_species_id": null, "occupant_mismatch": false, "upgrades": []})
+	hotel_rooms.append({"slot": slot_index, "room_type_id": room_type_id, "occupant": null, "occupant_name": null, "occupant_species_id": null, "occupant_mismatch": false, "upgrades": [], "needs_cleaning": false})
 	return true
 
 

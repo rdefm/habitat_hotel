@@ -143,8 +143,16 @@ func _effective_stats_by_slot() -> Dictionary:
 	return out
 
 
+## Meals/incidents arrive in Chunk 5; care-per-night is already folded into
+## match-time satisfaction. This phase also doubles as the housekeeping
+## turnover point: any room left dirty by a Morning checkout is cleaned here,
+## so it's unavailable to Midday's matcher for the rest of that day and
+## ready again next day.
 func _do_evening(_day: int) -> void:
-	pass # Meals/incidents arrive in Chunk 5; care-per-night is already folded into match-time satisfaction.
+	for room in GameState.hotel_rooms:
+		if room.get("needs_cleaning", false):
+			room["needs_cleaning"] = false
+			EventBus.room_cleaned.emit(int(room["slot"]))
 
 
 func _do_night(day: int) -> void:
@@ -255,5 +263,7 @@ func _checkout_guest(gid: int) -> void:
 	room["occupant_name"] = null
 	room["occupant_species_id"] = null
 	room["occupant_mismatch"] = false
+	room["needs_cleaning"] = true
 	guests.erase(gid)
 	_day_metrics["checkouts"] += 1
+	EventBus.room_marked_dirty.emit(g["room_slot_index"])

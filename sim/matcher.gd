@@ -25,7 +25,7 @@ extends RefCounted
 ## rather than "fully_booked"/"no_match_available".
 
 static func decide(arrival: Dictionary, hotel_rooms: Array, room_stats_by_slot: Dictionary, policy: String, price_multipliers: Dictionary, pricing_balance: Dictionary) -> Dictionary:
-	var vacant: Array = hotel_rooms.filter(func(r): return r["occupant"] == null)
+	var vacant: Array = hotel_rooms.filter(func(r): return r["occupant"] == null and not r.get("needs_cleaning", false))
 
 	var strict_all: Array = vacant.filter(func(r):
 		var rt: Dictionary = room_stats_by_slot[r["slot"]]

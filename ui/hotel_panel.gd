@@ -25,6 +25,8 @@ func _ready() -> void:
 	_build_cells()
 	refresh()
 	EventBus.day_summary.connect(func(_s): refresh())
+	EventBus.room_marked_dirty.connect(func(_s): refresh())
+	EventBus.room_cleaned.connect(func(_s): refresh())
 
 
 func _build_cells() -> void:
@@ -66,6 +68,7 @@ func refresh() -> void:
 		else:
 			var room_type: Dictionary = GameState.rooms[room["room_type_id"]]
 			var occupied := room["occupant"] != null
+			var dirty: bool = not occupied and bool(room.get("needs_cleaning", false))
 			var upgrade_count: int = room.get("upgrades", []).size()
 			var suffix := " ^%d" % upgrade_count if upgrade_count > 0 else ""
 			var occupant_line := ""
@@ -81,6 +84,10 @@ func refresh() -> void:
 				occupant_line = "\n%s\n%s (%s)" % [guest_name, species_name, fit_text]
 				modulate_color = Color(1.0, 0.85, 0.5) if mismatch else Color(0.75, 1.0, 0.75)
 				tooltip = "%s the %s -- %s" % [guest_name, species_name, fit_text]
+			elif dirty:
+				occupant_line = "\n(cleaning)"
+				modulate_color = Color(0.8, 0.75, 0.5)
+				tooltip = "Being cleaned by housekeeping"
 
 			btn.text = "Slot %d\n%s%s%s" % [slot_index, room_type["name"], suffix, occupant_line]
 			btn.disabled = not interactive
