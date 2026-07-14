@@ -1,15 +1,20 @@
 class_name UpgradeMenu
 extends VBoxContainer
 
-## Upgrade menu for one built room instance: shows its current effective
-## stats, already-purchased upgrades, and any remaining ones to buy. Opened
-## by tapping a built room in the (now-interactive) hotel grid.
+## Details menu for one built room instance: shows its current effective
+## stats, already-purchased upgrades, any remaining ones to buy, and the
+## nightly price for its room type (+/- steps, same mechanism as the Prices
+## menu -- note this affects every room of this type, not just this slot,
+## since price is tracked per room type). Opened by tapping a built room in
+## the (now-interactive) hotel grid.
 
 var slot_index: int = -1
 
 var _stats_label: Label
 var _purchased_list: VBoxContainer
 var _available_list: VBoxContainer
+var _price_mult_label: Label
+var _price_rate_label: Label
 
 
 func _ready() -> void:
@@ -36,6 +41,47 @@ func _ready() -> void:
 	_available_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_available_list)
 
+	add_child(_build_price_row())
+
+	_refresh()
+
+
+func _build_price_row() -> Control:
+	var header := Label.new()
+	header.text = "Price (applies to all rooms of this type):"
+	add_child(header)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+
+	var minus_btn := Button.new()
+	minus_btn.text = "-"
+	minus_btn.pressed.connect(_on_price_adjust.bind(-1))
+	row.add_child(minus_btn)
+
+	_price_mult_label = Label.new()
+	_price_mult_label.custom_minimum_size = Vector2(60, 0)
+	row.add_child(_price_mult_label)
+
+	var plus_btn := Button.new()
+	plus_btn.text = "+"
+	plus_btn.pressed.connect(_on_price_adjust.bind(1))
+	row.add_child(plus_btn)
+
+	_price_rate_label = Label.new()
+	row.add_child(_price_rate_label)
+
+	return row
+
+
+func _on_price_adjust(direction: int) -> void:
+	var room := GameState.room_at_slot(slot_index)
+	if room.is_empty():
+		return
+	var room_type_id: String = room["room_type_id"]
+	var step: float = float(GameState.balance.get("pricing", {}).get("step", 0.1))
+	var current := GameState.price_multiplier_for(room_type_id)
+	GameState.set_price_multiplier(room_type_id, current + step * direction)
 	_refresh()
 
 
@@ -47,8 +93,8 @@ func _refresh() -> void:
 
 	var base: Dictionary = GameState.rooms[room["room_type_id"]]
 	var stats := GameState.effective_room_stats(room)
-	_stats_label.text = "%s (slot %d)\ntags=%s  capacity=%d  upkeep=%d/day  rate=%d/night%s" % [
-		base["name"], slot_index, stats["tags"], int(stats["capacity"]), int(stats["upkeep_per_day"]), int(base["base_rate"]),
+	_stats_label.text = "%s (slot %d)\ntags=%s  capacity=%d  upkeep=%d/day%s" % [
+		base["name"], slot_index, stats["tags"], int(stats["capacity"]), int(stats["upkeep_per_day"]),
 		("  satisfaction +%d" % int(stats["satisfaction_bonus"])) if float(stats.get("satisfaction_bonus", 0)) != 0.0 else "",
 	]
 
@@ -69,6 +115,10 @@ func _refresh() -> void:
 		_available_list.add_child(_label("No more upgrades for this room type."))
 	for upgrade in available:
 		_available_list.add_child(_build_upgrade_row(upgrade))
+
+	var mult := GameState.price_multiplier_for(room["room_type_id"])
+	_price_mult_label.text = "%.1fx" % mult
+	_price_rate_label.text = "= %d/night" % int(round(float(base["base_rate"]) * mult))
 
 
 func _build_upgrade_row(upgrade: Dictionary) -> Control:
