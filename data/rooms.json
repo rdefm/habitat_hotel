@@ -1,0 +1,9 @@
+{
+  "cozy_nook":     {"display_name": "Cozy Nook",     "tags": ["warm", "dry", "quiet"],        "capacity": 2, "nightly_rate": 40,  "build_cost": 800,  "tier": 1},
+  "roost_loft":    {"display_name": "Roost Loft",    "tags": ["high_perch", "dry"],           "capacity": 6, "nightly_rate": 35,  "build_cost": 1000, "tier": 1},
+  "lagoon_room":   {"display_name": "Lagoon Room",   "tags": ["warm", "water"],               "capacity": 3, "nightly_rate": 60,  "build_cost": 1800, "tier": 1},
+  "veranda_suite": {"display_name": "Veranda Suite", "tags": ["warm", "water", "spacious"],   "capacity": 6, "nightly_rate": 90,  "build_cost": 2600, "tier": 2},
+  "ice_grotto":    {"display_name": "Ice Grotto",    "tags": ["cold", "water"],               "capacity": 4, "nightly_rate": 120, "build_cost": 3000, "tier": 2},
+  "cavern_suite":  {"display_name": "Cavern Suite",  "tags": ["dark", "quiet", "high_perch"], "capacity": 8, "nightly_rate": 150, "build_cost": 5000, "tier": 3},
+  "tundra_hall":   {"display_name": "Tundra Hall",   "tags": ["cold", "spacious"],            "capacity": 2, "nightly_rate": 180, "build_cost": 6500, "tier": 3}
+}

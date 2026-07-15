@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "ticks_per_sim_second": 8,
+  "phase_lengths_sim_seconds": {"morning": 30, "afternoon": 50, "evening": 20},
+  "speed_soft_slow": 0.3,
+  "max_guest_tier": 2,
+  "max_room_tier": 2,
+  "starting_cash": 2000,
+  "grid_floors": 3,
+  "grid_plots_per_floor": 4,
+  "clean_duration_sim_seconds": 14,
+  "base_patience_sim_seconds": 35,
+  "patience_states": {"content_above": 0.6, "huffy_above": 0.25},
+  "arrivals_per_day_min": 2,
+  "arrivals_per_day_max": 5,
+  "arrivals_ramp_by_day": [[1, 2, 3], [4, 2, 4], [7, 3, 5]],
+  "arrival_spread_fraction": 0.7,
+  "popin_chance_morning": 0.15,
+  "popin_chance_evening": 0.2,
+  "party_split_satisfaction_penalty": 10,
+  "partial_seating_satisfaction_penalty": 8,
+  "amber_missing_need_satisfaction_penalty": 25,
+  "satisfaction_base": 70,
+  "satisfaction_per_like_met": 10,
+  "satisfaction_cap": 100,
+  "starting_hotel": {
+    "grid_floors": 3,
+    "grid_plots_per_floor": 4,
+    "prebuilt": [
+      {"plot_id": 0, "room_type": "cozy_nook"},
+      {"plot_id": 1, "room_type": "roost_loft"},
+      {"plot_id": 2, "room_type": "lagoon_room"},
+      {"plot_id": 3, "room_type": "lagoon_room"}
+    ]
+  }
+}

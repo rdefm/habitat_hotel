@@ -1,0 +1,10 @@
+{
+  "pigeon":       {"display_name": "Pigeon",       "tier": 1, "needs": ["high_perch"],                  "likes": [],           "budget": "low",  "party_min": 1, "party_max": 6, "stay_min": 1, "stay_max": 2, "patience_mult": 0.6,  "weight": 1.0},
+  "capybara":     {"display_name": "Capybara",     "tier": 1, "needs": ["warm", "water"],                "likes": ["quiet"],    "budget": "low",  "party_min": 1, "party_max": 3, "stay_min": 2, "stay_max": 4, "patience_mult": 1.2,  "weight": 1.0},
+  "tortoise":     {"display_name": "Tortoise",     "tier": 1, "needs": ["warm", "dry"],                  "likes": ["quiet"],    "budget": "low",  "party_min": 1, "party_max": 1, "stay_min": 3, "stay_max": 6, "patience_mult": 10.0, "weight": 0.8},
+  "penguin":      {"display_name": "Penguin",      "tier": 2, "needs": ["cold", "water"],                "likes": ["quiet"],    "budget": "mid",  "party_min": 1, "party_max": 4, "stay_min": 1, "stay_max": 3, "patience_mult": 1.0,  "weight": 0.9},
+  "flamingo":     {"display_name": "Flamingo",     "tier": 2, "needs": ["warm", "water"],                "likes": ["spacious"], "budget": "mid",  "party_min": 2, "party_max": 6, "stay_min": 1, "stay_max": 2, "patience_mult": 0.8,  "weight": 0.9},
+  "bat":          {"display_name": "Bat",          "tier": 3, "needs": ["dark", "high_perch"],           "likes": ["quiet"],    "budget": "mid",  "party_min": 1, "party_max": 8, "stay_min": 1, "stay_max": 2, "patience_mult": 1.0,  "weight": 0.8},
+  "polar_bear":   {"display_name": "Polar Bear",   "tier": 3, "needs": ["cold", "spacious"],              "likes": ["water"],    "budget": "high", "party_min": 1, "party_max": 2, "stay_min": 2, "stay_max": 5, "patience_mult": 1.1,  "weight": 0.6},
+  "snow_leopard": {"display_name": "Snow Leopard", "tier": 4, "needs": ["cold", "high_perch", "quiet"],  "likes": ["spacious"], "budget": "high", "party_min": 1, "party_max": 1, "stay_min": 3, "stay_max": 7, "patience_mult": 1.5,  "weight": 0.4}
+}
