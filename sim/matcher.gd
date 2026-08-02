@@ -13,10 +13,12 @@ extends RefCounted
 ##    seat into any vacant room big enough (satisfaction penalty applies).
 ##    Only walks away if there is no affordable vacancy at all.
 ##
-## room_stats_by_slot maps each hotel_rooms slot index to its EFFECTIVE
-## stats (base room type merged with that specific instance's purchased
-## upgrades -- see GameState.effective_room_stats) rather than the raw type
-## catalog, since two rooms of the same type can carry different upgrades.
+## Rooms are addressed by room_type_id + instance_id (see ADR-0004) rather
+## than a flat slot index. room_stats_by_key maps each hotel_rooms entry's
+## room_key() to its EFFECTIVE stats (base room type merged with that
+## specific instance's purchased upgrades -- see GameState.effective_room_stats)
+## rather than the raw type catalog, since two rooms of the same type can
+## carry different upgrades.
 ##
 ## A room only counts as a candidate if its current price (base_rate *
 ## price_multiplier) is within the guest's budget tier's tolerance -- see
@@ -24,34 +26,47 @@ extends RefCounted
 ## can't afford any candidate room walks away with reason "too_expensive"
 ## rather than "fully_booked"/"no_match_available".
 
-static func decide(arrival: Dictionary, hotel_rooms: Array, room_stats_by_slot: Dictionary, policy: String, price_multipliers: Dictionary, pricing_balance: Dictionary) -> Dictionary:
+static func decide(arrival: Dictionary, hotel_rooms: Array, room_stats_by_key: Dictionary, policy: String, price_multipliers: Dictionary, pricing_balance: Dictionary) -> Dictionary:
 	var vacant: Array = hotel_rooms.filter(func(r): return r["occupant"] == null and not r.get("needs_cleaning", false))
 
 	var strict_all: Array = vacant.filter(func(r):
-		var rt: Dictionary = room_stats_by_slot[r["slot"]]
+		var rt: Dictionary = room_stats_by_key[room_key(r)]
 		return int(rt["capacity"]) >= int(arrival["party_size"]) and _tags_cover_needs(rt["tags"], arrival["needs"])
 	)
 	var strict_affordable: Array = strict_all.filter(func(r): return _is_affordable(r["room_type_id"], arrival["budget"], price_multipliers, pricing_balance))
 	if strict_affordable.size() > 0:
-		var chosen := _smallest_capacity(strict_affordable, room_stats_by_slot)
-		return {"action": "matched", "room_slot_index": _index_of_slot(hotel_rooms, chosen["slot"]), "mismatch": false, "reason": "matched_strict"}
+		var chosen := _smallest_capacity(strict_affordable, room_stats_by_key)
+		return _matched(chosen, false, "matched_strict")
 
 	if policy == "fill_vacancies":
-		var any_all: Array = vacant.filter(func(r): return int(room_stats_by_slot[r["slot"]]["capacity"]) >= int(arrival["party_size"]))
+		var any_all: Array = vacant.filter(func(r): return int(room_stats_by_key[room_key(r)]["capacity"]) >= int(arrival["party_size"]))
 		var any_affordable: Array = any_all.filter(func(r): return _is_affordable(r["room_type_id"], arrival["budget"], price_multipliers, pricing_balance))
 		if any_affordable.size() > 0:
-			var chosen2 := _smallest_capacity(any_affordable, room_stats_by_slot)
-			return {"action": "matched", "room_slot_index": _index_of_slot(hotel_rooms, chosen2["slot"]), "mismatch": true, "reason": "matched_mismatch"}
+			var chosen2 := _smallest_capacity(any_affordable, room_stats_by_key)
+			return _matched(chosen2, true, "matched_mismatch")
 		if any_all.size() > 0:
-			return {"action": "walk_away", "room_slot_index": -1, "mismatch": false, "reason": "too_expensive"}
-		return {"action": "walk_away", "room_slot_index": -1, "mismatch": false, "reason": "fully_booked"}
+			return _walk_away("too_expensive")
+		return _walk_away("fully_booked")
 
 	# strict_match policy: a mismatched room is never an option.
 	if strict_all.size() > 0:
-		return {"action": "walk_away", "room_slot_index": -1, "mismatch": false, "reason": "too_expensive"}
+		return _walk_away("too_expensive")
 	if vacant.size() > 0:
-		return {"action": "walk_away", "room_slot_index": -1, "mismatch": false, "reason": "no_match_available"}
-	return {"action": "walk_away", "room_slot_index": -1, "mismatch": false, "reason": "fully_booked"}
+		return _walk_away("no_match_available")
+	return _walk_away("fully_booked")
+
+
+## The key room_stats_by_key is keyed on for a given hotel_rooms entry.
+static func room_key(room: Dictionary) -> String:
+	return "%s#%d" % [room["room_type_id"], int(room["instance_id"])]
+
+
+static func _matched(room: Dictionary, mismatch: bool, reason: String) -> Dictionary:
+	return {"action": "matched", "room_type_id": room["room_type_id"], "instance_id": int(room["instance_id"]), "mismatch": mismatch, "reason": reason}
+
+
+static func _walk_away(reason: String) -> Dictionary:
+	return {"action": "walk_away", "room_type_id": "", "instance_id": -1, "mismatch": false, "reason": reason}
 
 
 static func _is_affordable(room_type_id: String, budget: String, price_multipliers: Dictionary, pricing_balance: Dictionary) -> bool:
@@ -70,19 +85,12 @@ static func _tags_cover_needs(room_tags: Array, needs: Array) -> bool:
 	return true
 
 
-static func _smallest_capacity(candidates: Array, room_stats_by_slot: Dictionary) -> Dictionary:
+static func _smallest_capacity(candidates: Array, room_stats_by_key: Dictionary) -> Dictionary:
 	var best: Dictionary = candidates[0]
-	var best_capacity: int = int(room_stats_by_slot[best["slot"]]["capacity"])
+	var best_capacity: int = int(room_stats_by_key[room_key(best)]["capacity"])
 	for r in candidates:
-		var cap: int = int(room_stats_by_slot[r["slot"]]["capacity"])
+		var cap: int = int(room_stats_by_key[room_key(r)]["capacity"])
 		if cap < best_capacity:
 			best = r
 			best_capacity = cap
 	return best
-
-
-static func _index_of_slot(hotel_rooms: Array, slot: int) -> int:
-	for i in range(hotel_rooms.size()):
-		if hotel_rooms[i]["slot"] == slot:
-			return i
-	return -1

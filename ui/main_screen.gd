@@ -157,20 +157,18 @@ func _build_menu_bar() -> HBoxContainer:
 
 ## --- Hotel panel (the always-visible grid) ---
 
-func _on_hotel_slot_selected(slot_index: int) -> void:
-	if not GameState.is_slot_unlocked(slot_index):
-		return
-	var room := GameState.room_at_slot(slot_index)
-	if room.is_empty():
+func _on_hotel_slot_selected(room_type_id: String, instance_id: int) -> void:
+	var room_name: String = GameState.rooms[room_type_id]["name"]
+	if instance_id == -1:
 		var menu := BuildMenu.new()
-		menu.slot_index = slot_index
+		menu.room_type_id = room_type_id
 		menu.build_completed.connect(close_menu)
-		open_menu("Build (slot %d)" % slot_index, menu)
+		open_menu("Build %s" % room_name, menu)
 	else:
-		var room_name: String = GameState.rooms[room["room_type_id"]]["name"]
 		var menu := UpgradeMenu.new()
-		menu.slot_index = slot_index
-		open_menu("Upgrade %s (slot %d)" % [room_name, slot_index], menu)
+		menu.room_type_id = room_type_id
+		menu.instance_id = instance_id
+		open_menu("Upgrade %s #%d" % [room_name, instance_id], menu)
 
 
 ## --- Day log ---

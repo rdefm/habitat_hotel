@@ -1,42 +1,27 @@
 class_name BuildMenu
 extends VBoxContainer
 
-## Build menu: room catalog for one pre-chosen slot. Opened by tapping an
-## empty, unlocked slot on the main grid, which sets slot_index before
-## adding this to the scene -- this menu never shows a slot picker of its
-## own (see ui/main_screen.gd's _on_hotel_slot_selected). Pick a catalog
-## entry to construct there (cash permitting); this is the sim's match to
-## "choose what to build for the demand you see."
+## Build menu for one pre-chosen Floor's Room type. Opened by tapping that
+## Floor's Build Slot on the main grid, which sets room_type_id before adding
+## this to the scene -- this menu never shows a catalog of other Room types,
+## since a Build Slot only ever builds another instance of its own Floor's
+## type (ADR-0004). This is the sim's match to "choose to build for the
+## demand you see."
 
 const DemandFormat = preload("res://ui/demand_format.gd")
 const RECENT_DAYS_FOR_DEMAND := 5
 
 ## Set by the caller before this node enters the tree.
-var slot_index: int = -1
+var room_type_id: String = ""
 
 signal build_completed
-
-var _catalog_list: VBoxContainer
 
 
 func _ready() -> void:
 	custom_minimum_size = Vector2(560, 460)
 
 	add_child(_build_demand_panel())
-
-	var catalog_label := Label.new()
-	catalog_label.text = "Room catalog:"
-	add_child(catalog_label)
-
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_child(scroll)
-
-	_catalog_list = VBoxContainer.new()
-	_catalog_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_catalog_list)
-
-	_refresh_catalog()
+	add_child(_build_catalog_row())
 
 
 func _build_demand_panel() -> Control:
@@ -74,40 +59,30 @@ func _recent_turned_away_summary() -> String:
 	return DemandFormat.summarize_counts(totals, GameState.species)
 
 
-func _refresh_catalog() -> void:
-	for child in _catalog_list.get_children():
-		child.queue_free()
+func _build_catalog_row() -> Control:
+	var rt: Dictionary = GameState.rooms[room_type_id]
 
-	var room_ids := GameState.rooms.keys()
-	room_ids.sort()
-	for room_type_id in room_ids:
-		var rt: Dictionary = GameState.rooms[room_type_id]
-		if not GameState.can_build_room_type(room_type_id):
-			continue
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
 
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 10)
+	var info := Label.new()
+	info.text = "%s (%s)\ncap %d, upkeep %d/day, rate %d/night" % [
+		rt["name"], String(", ").join(rt["tags"]), int(rt["capacity"]), int(rt["upkeep_per_day"]), int(rt["base_rate"]),
+	]
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD
+	info.custom_minimum_size = Vector2(300, 0)
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(info)
 
-		var info := Label.new()
-		info.text = "%s (%s)\ncap %d, upkeep %d/day, rate %d/night" % [
-			rt["name"], String(", ").join(rt["tags"]), int(rt["capacity"]), int(rt["upkeep_per_day"]), int(rt["base_rate"]),
-		]
-		info.autowrap_mode = TextServer.AUTOWRAP_WORD
-		info.custom_minimum_size = Vector2(300, 0)
-		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(info)
+	var build_btn := Button.new()
+	build_btn.text = "Build (%d cash)" % int(rt["build_cost"])
+	build_btn.disabled = GameState.cash < int(rt["build_cost"]) or not GameState.can_build_more(room_type_id)
+	build_btn.pressed.connect(_on_build_pressed)
+	row.add_child(build_btn)
 
-		var build_btn := Button.new()
-		build_btn.text = "Build (%d cash)" % int(rt["build_cost"])
-		build_btn.disabled = GameState.cash < int(rt["build_cost"])
-		build_btn.pressed.connect(_on_build_pressed.bind(room_type_id))
-		row.add_child(build_btn)
-
-		_catalog_list.add_child(row)
+	return row
 
 
-func _on_build_pressed(room_type_id: String) -> void:
-	if not GameState.room_at_slot(slot_index).is_empty():
-		return
-	if GameState.build_room(slot_index, room_type_id):
+func _on_build_pressed() -> void:
+	if GameState.build_room(room_type_id):
 		build_completed.emit()

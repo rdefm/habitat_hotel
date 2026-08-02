@@ -30,12 +30,14 @@ var traits: Dictionary = {}
 var seasons: Dictionary = {}
 var balance: Dictionary = {}
 var names: Dictionary = {}
-var slot_layout: Array = []
 var _starting_hotel_template: Array = []
 
-# Mutable hotel instance state: Array of {slot, room_type_id, occupant (guest id or null)}.
-# Only ever contains BUILT rooms -- Sim/Matcher never need to know about
-# locked or unlocked-but-empty slots, that's purely a Build-menu concern.
+# Mutable hotel instance state: Array of {room_type_id, instance_id, occupant
+# (guest id or null)}. Only ever contains BUILT rooms -- Sim/Matcher never
+# need to know about locked or unbuilt Floors/Build Slots, that's purely a
+# Build-menu concern. instance_id is stable and scoped to room_type_id (0,
+# 1, 2, ... in build order); together they're the addressing scheme every
+# consumer (build/upgrade/query, Sim, EventBus payloads) uses -- see ADR-0004.
 var hotel_rooms: Array = []
 
 # Set of built amenity ids (e.g. "pool"). Empty until amenities can be built;
@@ -75,7 +77,6 @@ func _load_data() -> void:
 	seasons = data["seasons"]
 	balance = data["balance"]
 	_starting_hotel_template = data["starting_hotel"]
-	slot_layout = data["slot_layout"]
 	names = data["names"]
 	EventBus.data_loaded.emit()
 
@@ -116,17 +117,25 @@ func _on_forecast_ready(for_day: int, arrivals: Array) -> void:
 
 func _build_starting_hotel() -> void:
 	hotel_rooms.clear()
+	var counts: Dictionary = {}
 	for entry in _starting_hotel_template:
-		hotel_rooms.append({
-			"slot": entry["slot"],
-			"room_type_id": entry["room_type_id"],
-			"occupant": null,
-			"occupant_name": null,
-			"occupant_species_id": null,
-			"occupant_mismatch": false,
-			"upgrades": [],
-			"needs_cleaning": false,
-		})
+		var room_type_id: String = entry["room_type_id"]
+		var instance_id: int = int(counts.get(room_type_id, 0))
+		counts[room_type_id] = instance_id + 1
+		hotel_rooms.append(_new_room_instance(room_type_id, instance_id))
+
+
+func _new_room_instance(room_type_id: String, instance_id: int) -> Dictionary:
+	return {
+		"room_type_id": room_type_id,
+		"instance_id": instance_id,
+		"occupant": null,
+		"occupant_name": null,
+		"occupant_species_id": null,
+		"occupant_mismatch": false,
+		"upgrades": [],
+		"needs_cleaning": false,
+	}
 
 
 func _reset_price_multipliers() -> void:
@@ -140,43 +149,59 @@ func _on_day_advanced(new_day: int) -> void:
 	day = new_day
 
 
-## --- Slot/build queries, used by the Build menu ---
+## --- Floor/build queries, used by the Build menu ---
 
-func is_slot_unlocked(slot_index: int) -> bool:
-	for entry in slot_layout:
-		if int(entry["slot"]) == slot_index:
-			return stars >= int(entry["unlock"]["star"])
-	return false
-
-
-func room_at_slot(slot_index: int) -> Dictionary:
-	for room in hotel_rooms:
-		if int(room["slot"]) == slot_index:
-			return room
-	return {}
-
-
+## A Floor is unlocked (buildable, visible) once the current star level meets
+## its Room type's own unlock.star field -- there is no separate slot-level
+## unlock table any more (see ADR-0004).
 func can_build_room_type(room_type_id: String) -> bool:
 	if not rooms.has(room_type_id):
 		return false
 	return stars >= int(rooms[room_type_id]["unlock"]["star"])
 
 
-## Attempts to build room_type_id into slot_index. Returns true on success;
-## false (with no side effects) if the slot is locked, already occupied, the
-## room type isn't unlocked yet, or cash is insufficient.
-func build_room(slot_index: int, room_type_id: String) -> bool:
-	if not is_slot_unlocked(slot_index):
+func floor_instance_count(room_type_id: String) -> int:
+	var count := 0
+	for room in hotel_rooms:
+		if room["room_type_id"] == room_type_id:
+			count += 1
+	return count
+
+
+func floor_instance_cap(room_type_id: String) -> int:
+	return int(rooms.get(room_type_id, {}).get("max_instances", 0))
+
+
+## True while room_type_id's Floor is unlocked AND still under its instance
+## cap -- i.e. whether a Build Slot should be offered for it right now.
+func can_build_more(room_type_id: String) -> bool:
+	if not rooms.has(room_type_id):
 		return false
-	if not room_at_slot(slot_index).is_empty():
-		return false
+	return floor_instance_count(room_type_id) < floor_instance_cap(room_type_id)
+
+
+## Looks up the built room instance addressed by room_type_id + instance_id.
+## Returns {} if no such instance has been built.
+func room_instance(room_type_id: String, instance_id: int) -> Dictionary:
+	for room in hotel_rooms:
+		if room["room_type_id"] == room_type_id and int(room["instance_id"]) == instance_id:
+			return room
+	return {}
+
+
+## Attempts to build another instance of room_type_id's Floor. Returns true
+## on success; false (with no side effects) if the Floor is locked, already
+## at its instance cap, or cash is insufficient.
+func build_room(room_type_id: String) -> bool:
 	if not can_build_room_type(room_type_id):
+		return false
+	if not can_build_more(room_type_id):
 		return false
 	var cost := int(rooms[room_type_id]["build_cost"])
 	if cash < cost:
 		return false
 	cash -= cost
-	hotel_rooms.append({"slot": slot_index, "room_type_id": room_type_id, "occupant": null, "occupant_name": null, "occupant_species_id": null, "occupant_mismatch": false, "upgrades": [], "needs_cleaning": false})
+	hotel_rooms.append(_new_room_instance(room_type_id, floor_instance_count(room_type_id)))
 	return true
 
 
@@ -186,12 +211,12 @@ func build_room(slot_index: int, room_type_id: String) -> bool:
 ## upgrade it has purchased. This is what Matcher/Satisfaction/Sim's upkeep
 ## calc should always read instead of GameState.rooms[...] directly, since
 ## two instances of the same room type can have different upgrades.
-func effective_room_stats(room_instance: Dictionary) -> Dictionary:
-	var base: Dictionary = rooms[room_instance["room_type_id"]]
+func effective_room_stats(room: Dictionary) -> Dictionary:
+	var base: Dictionary = rooms[room["room_type_id"]]
 	var stats: Dictionary = base.duplicate(true)
 	stats["satisfaction_bonus"] = 0
 
-	for upgrade_id in room_instance.get("upgrades", []):
+	for upgrade_id in room.get("upgrades", []):
 		var upgrade := _find_upgrade(base, upgrade_id)
 		if upgrade.is_empty():
 			continue
@@ -208,9 +233,9 @@ func effective_room_stats(room_instance: Dictionary) -> Dictionary:
 
 
 ## Upgrades in room_instance's type catalog that haven't been purchased yet.
-func available_upgrades_for(room_instance: Dictionary) -> Array:
-	var base: Dictionary = rooms[room_instance["room_type_id"]]
-	var purchased: Array = room_instance.get("upgrades", [])
+func available_upgrades_for(room: Dictionary) -> Array:
+	var base: Dictionary = rooms[room["room_type_id"]]
+	var purchased: Array = room.get("upgrades", [])
 	var out: Array = []
 	for upgrade in base.get("upgrades", []):
 		if not purchased.has(upgrade["id"]):
@@ -225,11 +250,12 @@ func _find_upgrade(room_type: Dictionary, upgrade_id: String) -> Dictionary:
 	return {}
 
 
-## Attempts to buy upgrade_id for the room built at slot_index. Returns true
-## on success; false (no side effects) if the slot has no room, the upgrade
-## doesn't exist/is already purchased, or cash+Hearts are insufficient.
-func purchase_upgrade(slot_index: int, upgrade_id: String) -> bool:
-	var room := room_at_slot(slot_index)
+## Attempts to buy upgrade_id for the room instance addressed by
+## room_type_id + instance_id. Returns true on success; false (no side
+## effects) if that instance doesn't exist, the upgrade doesn't exist/is
+## already purchased, or cash+Hearts are insufficient.
+func purchase_upgrade(room_type_id: String, instance_id: int, upgrade_id: String) -> bool:
+	var room := room_instance(room_type_id, instance_id)
 	if room.is_empty():
 		return false
 	var base: Dictionary = rooms[room["room_type_id"]]

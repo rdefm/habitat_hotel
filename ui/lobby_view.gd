@@ -135,10 +135,10 @@ func _species_name(species_id: String) -> String:
 
 ## --- Event queue: signals only enqueue; _play_* does the actual animating ---
 
-func _on_guest_seated(guest_name: String, species_id: String, room_slot_index: int, mismatch: bool) -> void:
+func _on_guest_seated(guest_name: String, species_id: String, room_type_id: String, instance_id: int, mismatch: bool) -> void:
 	_enqueue({
 		"kind": "seated", "guest_name": guest_name, "species_id": species_id,
-		"room_slot_index": room_slot_index, "mismatch": mismatch,
+		"room_type_id": room_type_id, "instance_id": instance_id, "mismatch": mismatch,
 	})
 
 
@@ -146,12 +146,12 @@ func _on_guest_turned_away(guest_name: String, species_id: String, reason: Strin
 	_enqueue({"kind": "turned_away", "guest_name": guest_name, "species_id": species_id, "reason": reason})
 
 
-func _on_guest_checked_out(guest_name: String, species_id: String, room_slot_index: int) -> void:
-	_enqueue({"kind": "checked_out", "guest_name": guest_name, "species_id": species_id, "room_slot_index": room_slot_index})
+func _on_guest_checked_out(guest_name: String, species_id: String, room_type_id: String, instance_id: int) -> void:
+	_enqueue({"kind": "checked_out", "guest_name": guest_name, "species_id": species_id, "room_type_id": room_type_id, "instance_id": instance_id})
 
 
-func _on_room_marked_dirty(slot_index: int) -> void:
-	_enqueue({"kind": "dirty", "slot_index": slot_index})
+func _on_room_marked_dirty(room_type_id: String, instance_id: int) -> void:
+	_enqueue({"kind": "dirty", "room_type_id": room_type_id, "instance_id": instance_id})
 
 
 func _enqueue(entry: Dictionary) -> void:
@@ -202,18 +202,18 @@ func _ticks_remaining_in_phase() -> int:
 func _play_entry(entry: Dictionary) -> void:
 	match entry["kind"]:
 		"seated":
-			_play_guest_seated(entry["guest_name"], entry["species_id"], entry["room_slot_index"], entry["mismatch"])
+			_play_guest_seated(entry["guest_name"], entry["species_id"], entry["room_type_id"], entry["instance_id"], entry["mismatch"])
 		"turned_away":
 			_play_guest_turned_away(entry["guest_name"], entry["species_id"], entry["reason"])
 		"checked_out":
-			_play_guest_checked_out(entry["guest_name"], entry["species_id"], entry["room_slot_index"])
+			_play_guest_checked_out(entry["guest_name"], entry["species_id"], entry["room_type_id"], entry["instance_id"])
 		"dirty":
-			_play_room_dirty(entry["slot_index"])
+			_play_room_dirty(entry["room_type_id"], entry["instance_id"])
 
 
 ## --- Playback (each runs exactly once per dequeued event) ---
 
-func _play_guest_seated(guest_name: String, species_id: String, _room_slot_index: int, mismatch: bool) -> void:
+func _play_guest_seated(guest_name: String, species_id: String, _room_type_id: String, _instance_id: int, mismatch: bool) -> void:
 	var guest := _make_actor(_short_name(guest_name), _guest_color(mismatch))
 	guest.tooltip_text = "%s the %s -- %s" % [guest_name, _species_name(species_id), ("mismatch" if mismatch else "perfect fit")]
 	guest.position = Vector2(ENTRANCE_X, ACTOR_Y)
@@ -243,7 +243,7 @@ func _play_guest_turned_away(guest_name: String, species_id: String, reason: Str
 	tween.tween_callback(guest.queue_free)
 
 
-func _play_guest_checked_out(guest_name: String, species_id: String, _room_slot_index: int) -> void:
+func _play_guest_checked_out(guest_name: String, species_id: String, _room_type_id: String, _instance_id: int) -> void:
 	var guest := _make_actor(_short_name(guest_name), Color(0.4, 0.4, 0.5))
 	guest.tooltip_text = "%s the %s -- checking out" % [guest_name, _species_name(species_id)]
 	guest.position = Vector2(ELEVATOR_X, ACTOR_Y)
@@ -256,7 +256,7 @@ func _play_guest_checked_out(guest_name: String, species_id: String, _room_slot_
 	tween.tween_callback(guest.queue_free)
 
 
-func _play_room_dirty(_slot_index: int) -> void:
+func _play_room_dirty(_room_type_id: String, _instance_id: int) -> void:
 	_send_housekeeper()
 
 

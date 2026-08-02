@@ -124,7 +124,7 @@ func _print_roster() -> void:
 	print("--- Starting hotel ---")
 	for room in GameState.hotel_rooms:
 		var rt: Dictionary = GameState.rooms[room["room_type_id"]]
-		print(" - Slot %d: %s %s" % [room["slot"], rt["name"], rt["tags"]])
+		print(" - %s #%d: %s" % [rt["name"], room["instance_id"], rt["tags"]])
 
 	print("========================================")
 

@@ -10,7 +10,7 @@ const Matcher = preload("res://sim/matcher.gd")
 const Satisfaction = preload("res://sim/satisfaction.gd")
 
 # STAYING guests only, keyed by guest id. Dict: {id, species_id, party_size,
-# nights_total, nights_remaining, room_slot_index, satisfaction, mismatch}.
+# nights_total, nights_remaining, room_type_id, room_instance_id, satisfaction, mismatch}.
 var guests: Dictionary = {}
 var _next_guest_id: int = 1
 
@@ -96,15 +96,15 @@ func _do_morning(day: int) -> void:
 
 func _do_midday(_day: int) -> void:
 	var pricing_balance: Dictionary = GameState.balance.get("pricing", {})
-	var room_stats_by_slot := _effective_stats_by_slot()
+	var room_stats_by_key := _effective_stats_by_key()
 	for arrival in _pending_arrivals:
-		var decision := Matcher.decide(arrival, GameState.hotel_rooms, room_stats_by_slot, GameState.matcher_policy, GameState.price_multipliers, pricing_balance)
+		var decision := Matcher.decide(arrival, GameState.hotel_rooms, room_stats_by_key, GameState.matcher_policy, GameState.price_multipliers, pricing_balance)
 		match decision["reason"]:
 			"matched_strict":
-				_admit_guest(arrival, decision["room_slot_index"], false)
+				_admit_guest(arrival, decision["room_type_id"], decision["instance_id"], false)
 				_day_metrics["matched_strict"] += 1
 			"matched_mismatch":
-				_admit_guest(arrival, decision["room_slot_index"], true)
+				_admit_guest(arrival, decision["room_type_id"], decision["instance_id"], true)
 				_day_metrics["matched_mismatched"] += 1
 			"no_match_available":
 				# Turned away because no room *type* could meet their needs (strict policy) --
@@ -134,12 +134,13 @@ func _track_turned_away(arrival: Dictionary) -> void:
 
 
 ## Base room type stats merged with each instance's purchased upgrades,
-## keyed by slot index. Computed fresh each Midday/Night since upgrades can
-## be bought between phases while the clock is paused for a menu.
-func _effective_stats_by_slot() -> Dictionary:
+## keyed by Matcher.room_key() (room_type_id + instance_id). Computed fresh
+## each Midday/Night since upgrades can be bought between phases while the
+## clock is paused for a menu.
+func _effective_stats_by_key() -> Dictionary:
 	var out: Dictionary = {}
 	for room in GameState.hotel_rooms:
-		out[room["slot"]] = GameState.effective_room_stats(room)
+		out[Matcher.room_key(room)] = GameState.effective_room_stats(room)
 	return out
 
 
@@ -152,7 +153,7 @@ func _do_evening(_day: int) -> void:
 	for room in GameState.hotel_rooms:
 		if room.get("needs_cleaning", false):
 			room["needs_cleaning"] = false
-			EventBus.room_cleaned.emit(int(room["slot"]))
+			EventBus.room_cleaned.emit(room["room_type_id"], int(room["instance_id"]))
 
 
 func _do_night(day: int) -> void:
@@ -193,8 +194,8 @@ func _do_night(day: int) -> void:
 	EventBus.forecast_ready.emit(day + 1, _next_day_forecast.duplicate())
 
 
-func _admit_guest(arrival: Dictionary, room_slot_index: int, mismatch: bool) -> void:
-	var room: Dictionary = GameState.hotel_rooms[room_slot_index]
+func _admit_guest(arrival: Dictionary, room_type_id: String, instance_id: int, mismatch: bool) -> void:
+	var room: Dictionary = GameState.room_instance(room_type_id, instance_id)
 	var room_stats := GameState.effective_room_stats(room)
 	var sat := Satisfaction.compute(arrival, room_stats, GameState.hotel_amenities, GameState.balance)
 
@@ -207,7 +208,8 @@ func _admit_guest(arrival: Dictionary, room_slot_index: int, mismatch: bool) -> 
 		"party_size": arrival["party_size"],
 		"nights_total": arrival["nights_total"],
 		"nights_remaining": arrival["nights_total"],
-		"room_slot_index": room_slot_index,
+		"room_type_id": room_type_id,
+		"room_instance_id": instance_id,
 		"satisfaction": sat,
 		"mismatch": mismatch,
 	}
@@ -215,7 +217,7 @@ func _admit_guest(arrival: Dictionary, room_slot_index: int, mismatch: bool) -> 
 	room["occupant_name"] = arrival["name"]
 	room["occupant_species_id"] = arrival["species_id"]
 	room["occupant_mismatch"] = mismatch
-	EventBus.guest_seated.emit(arrival["name"], arrival["species_id"], room_slot_index, mismatch)
+	EventBus.guest_seated.emit(arrival["name"], arrival["species_id"], room_type_id, instance_id, mismatch)
 
 
 func _checkout_guest(gid: int) -> void:
@@ -223,7 +225,7 @@ func _checkout_guest(gid: int) -> void:
 		push_error("[Sim] Tried to check out unknown guest id %d" % gid)
 		return
 	var g: Dictionary = guests[gid]
-	var room: Dictionary = GameState.hotel_rooms[g["room_slot_index"]]
+	var room: Dictionary = GameState.room_instance(g["room_type_id"], g["room_instance_id"])
 	var room_stats := GameState.effective_room_stats(room)
 	var species: Dictionary = GameState.species[g["species_id"]]
 
@@ -257,7 +259,7 @@ func _checkout_guest(gid: int) -> void:
 		"flavor_line": flavor_line,
 	})
 
-	EventBus.guest_checked_out.emit(g["name"], g["species_id"], g["room_slot_index"])
+	EventBus.guest_checked_out.emit(g["name"], g["species_id"], g["room_type_id"], g["room_instance_id"])
 
 	room["occupant"] = null
 	room["occupant_name"] = null
@@ -266,4 +268,4 @@ func _checkout_guest(gid: int) -> void:
 	room["needs_cleaning"] = true
 	guests.erase(gid)
 	_day_metrics["checkouts"] += 1
-	EventBus.room_marked_dirty.emit(g["room_slot_index"])
+	EventBus.room_marked_dirty.emit(g["room_type_id"], g["room_instance_id"])

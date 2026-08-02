@@ -1,14 +1,16 @@
 class_name UpgradeMenu
 extends VBoxContainer
 
-## Details menu for one built room instance: shows its current effective
-## stats, already-purchased upgrades, any remaining ones to buy, and the
-## nightly price for its room type (+/- steps, same mechanism as the Prices
-## menu -- note this affects every room of this type, not just this slot,
-## since price is tracked per room type). Opened by tapping a built room in
-## the (now-interactive) hotel grid.
+## Details menu for one built room instance, addressed by room_type_id +
+## instance_id (ADR-0004): shows its current effective stats,
+## already-purchased upgrades, any remaining ones to buy, and the nightly
+## price for its room type (+/- steps, same mechanism as the Prices menu --
+## note this affects every room of this type, not just this instance, since
+## price is tracked per room type). Opened by tapping a built room in the
+## (now-interactive) hotel grid.
 
-var slot_index: int = -1
+var room_type_id: String = ""
+var instance_id: int = -1
 
 var _stats_label: Label
 var _purchased_list: VBoxContainer
@@ -75,10 +77,9 @@ func _build_price_row() -> Control:
 
 
 func _on_price_adjust(direction: int) -> void:
-	var room := GameState.room_at_slot(slot_index)
+	var room := GameState.room_instance(room_type_id, instance_id)
 	if room.is_empty():
 		return
-	var room_type_id: String = room["room_type_id"]
 	var step: float = float(GameState.balance.get("pricing", {}).get("step", 0.1))
 	var current := GameState.price_multiplier_for(room_type_id)
 	GameState.set_price_multiplier(room_type_id, current + step * direction)
@@ -86,7 +87,7 @@ func _on_price_adjust(direction: int) -> void:
 
 
 func _refresh() -> void:
-	var room := GameState.room_at_slot(slot_index)
+	var room := GameState.room_instance(room_type_id, instance_id)
 	if room.is_empty():
 		_stats_label.text = "This room no longer exists."
 		return
@@ -100,8 +101,8 @@ func _refresh() -> void:
 		var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
 		var mismatch: bool = room.get("occupant_mismatch", false)
 		occupant_line = "Occupied by %s the %s -- %s" % [guest_name, species_name, ("mismatch" if mismatch else "perfect fit")]
-	_stats_label.text = "%s (slot %d)\ntags=%s  capacity=%d  upkeep=%d/day%s\n%s" % [
-		base["name"], slot_index, stats["tags"], int(stats["capacity"]), int(stats["upkeep_per_day"]),
+	_stats_label.text = "%s #%d\ntags=%s  capacity=%d  upkeep=%d/day%s\n%s" % [
+		base["name"], instance_id, stats["tags"], int(stats["capacity"]), int(stats["upkeep_per_day"]),
 		("  satisfaction +%d" % int(stats["satisfaction_bonus"])) if float(stats.get("satisfaction_bonus", 0)) != 0.0 else "",
 		occupant_line,
 	]
@@ -152,7 +153,7 @@ func _build_upgrade_row(upgrade: Dictionary) -> Control:
 
 
 func _on_buy_pressed(upgrade_id: String) -> void:
-	if GameState.purchase_upgrade(slot_index, upgrade_id):
+	if GameState.purchase_upgrade(room_type_id, instance_id, upgrade_id):
 		_refresh()
 
 

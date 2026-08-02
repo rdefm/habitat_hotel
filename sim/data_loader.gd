@@ -14,7 +14,7 @@ const SPECIES_REQUIRED_FIELDS := [
 
 const ROOM_REQUIRED_FIELDS := [
 	"id", "name", "tags", "build_cost", "upkeep_per_day",
-	"base_rate", "capacity", "unlock",
+	"base_rate", "capacity", "unlock", "max_instances",
 ]
 
 const TRAIT_REQUIRED_FIELDS := ["id", "name", "description"]
@@ -28,7 +28,6 @@ static func load_all() -> Dictionary:
 	var seasons := load_seasons(tags)
 	var balance := load_balance()
 	var starting_hotel := load_starting_hotel(rooms)
-	var slot_layout := load_slot_layout()
 	var names := load_names(species)
 	return {
 		"tags": tags,
@@ -38,7 +37,6 @@ static func load_all() -> Dictionary:
 		"seasons": seasons,
 		"balance": balance,
 		"starting_hotel": starting_hotel,
-		"slot_layout": slot_layout,
 		"names": names,
 	}
 
@@ -261,37 +259,11 @@ static func load_starting_hotel(valid_rooms: Dictionary) -> Array:
 
 
 static func _validate_starting_room(entry: Dictionary, valid_rooms: Dictionary) -> bool:
-	for field in ["slot", "room_type_id"]:
-		if not entry.has(field):
-			push_error("[DataLoader] starting_hotel entry missing '%s': %s" % [field, JSON.stringify(entry)])
-			return false
+	if not entry.has("room_type_id"):
+		push_error("[DataLoader] starting_hotel entry missing 'room_type_id': %s" % JSON.stringify(entry))
+		return false
 	if not valid_rooms.has(entry["room_type_id"]):
 		push_error("[DataLoader] starting_hotel references unknown room type '%s'" % entry["room_type_id"])
-		return false
-	return true
-
-
-static func load_slot_layout() -> Array:
-	var raw: Variant = _read_json("slot_layout.json")
-	var out := []
-	if raw == null:
-		return out
-	if not (raw is Array):
-		push_error("[DataLoader] slot_layout.json must be a JSON array of objects")
-		return out
-	for entry in raw:
-		if entry is Dictionary and _validate_slot(entry):
-			out.append(entry)
-	return out
-
-
-static func _validate_slot(entry: Dictionary) -> bool:
-	for field in ["slot", "unlock"]:
-		if not entry.has(field):
-			push_error("[DataLoader] slot_layout entry missing '%s': %s" % [field, JSON.stringify(entry)])
-			return false
-	if not (entry["unlock"] is Dictionary and entry["unlock"].has("star")):
-		push_error("[DataLoader] slot_layout entry %d unlock must be an object with a 'star' field" % int(entry["slot"]))
 		return false
 	return true
 

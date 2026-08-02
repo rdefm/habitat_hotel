@@ -19,8 +19,10 @@ signal forecast_ready(for_day: int, arrivals: Array)
 ## Per-guest lifecycle events, purely for the lobby view's animation --
 ## Sim's authoritative state changes (cash, occupant, etc.) already happened
 ## by the time these fire; nothing should treat them as a source of truth.
-signal guest_seated(name: String, species_id: String, room_slot_index: int, mismatch: bool)
+## Rooms are identified by room_type_id + instance_id (see ADR-0004), not a
+## flat slot index.
+signal guest_seated(name: String, species_id: String, room_type_id: String, instance_id: int, mismatch: bool)
 signal guest_turned_away(name: String, species_id: String, reason: String)
-signal guest_checked_out(name: String, species_id: String, room_slot_index: int)
-signal room_marked_dirty(slot_index: int)
-signal room_cleaned(slot_index: int)
+signal guest_checked_out(name: String, species_id: String, room_type_id: String, instance_id: int)
+signal room_marked_dirty(room_type_id: String, instance_id: int)
+signal room_cleaned(room_type_id: String, instance_id: int)
