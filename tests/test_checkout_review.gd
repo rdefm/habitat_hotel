@@ -52,25 +52,16 @@ func test_checkout_leaves_its_room_dirty_and_vacant_until_the_next_evening_clean
 	Clock.force_advance_day()
 	Clock.force_advance_day()
 
-	var occupied := 0
-	var dirty := 0
-	for room in GameState.hotel_rooms:
-		if room["occupant"] != null:
-			occupied += 1
-		if room["needs_cleaning"]:
-			dirty += 1
-	assert_eq(occupied, 1, "3 of the 4 starting rooms were freed by checkout")
-	assert_eq(dirty, 3, "freed rooms start dirty -- Evening hasn't cleaned them yet")
+	var is_occupied := func(r): return r["occupant"] != null
+	var is_dirty := func(r): return r["needs_cleaning"]
+	assert_eq(count_rooms(is_occupied), 1, "3 of the 4 starting rooms were freed by checkout")
+	assert_eq(count_rooms(is_dirty), 3, "freed rooms start dirty -- Evening hasn't cleaned them yet")
 
 	watch_signals(EventBus)
 	Clock.force_advance_day()
 
 	assert_signal_emit_count(EventBus, "room_cleaned", 3, "the next day's Evening phase should clean all 3 dirty rooms")
-	dirty = 0
-	for room in GameState.hotel_rooms:
-		if room["needs_cleaning"]:
-			dirty += 1
-	assert_eq(dirty, 1, "only the newly-checked-out 4th room (processed by this call's own day-4 morning cascade) should still be dirty")
+	assert_eq(count_rooms(is_dirty), 1, "only the newly-checked-out 4th room (processed by this call's own day-4 morning cascade) should still be dirty")
 
 
 func test_neutral_review_awards_no_hearts_and_no_reputation_change() -> void:

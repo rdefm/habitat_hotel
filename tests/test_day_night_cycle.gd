@@ -3,9 +3,10 @@ extends "res://tests/helpers/sim_test_base.gd"
 ## Characterizes one full Morning->Midday->Evening->Night cycle producing a
 ## day summary via Clock.force_advance_day() -- the same call the headless
 ## batch runner uses. Values below are the deterministic output of Rng's
-## default seed (1337) against a freshly reset GameState/Sim; re-derive them
-## with tests/test_diag.gd-style print output (see docs/testing.md) if a
-## legitimate change to demand/matching/economy logic shifts them.
+## default seed (1337) against a freshly reset GameState/Sim; if a legitimate
+## change to demand/matching/economy logic shifts them, re-derive by
+## temporarily printing GameState.day_history/review_history from a test
+## (gut.p(...)) and re-running via the command in README.md's Testing section.
 
 func test_first_day_cycle_emits_a_day_summary_with_expected_shape() -> void:
 	watch_signals(EventBus)
@@ -37,9 +38,4 @@ func test_first_day_cycle_applies_its_summary_to_live_game_state() -> void:
 
 	assert_eq(GameState.cash, 4745, "GameState.cash should reflect the day's revenue/upkeep/wage, not just the summary dict")
 	assert_eq(GameState.day, 2)
-
-	var occupied := 0
-	for room in GameState.hotel_rooms:
-		if room["occupant"] != null:
-			occupied += 1
-	assert_eq(occupied, 4)
+	assert_eq(count_rooms(func(r): return r["occupant"] != null), 4)

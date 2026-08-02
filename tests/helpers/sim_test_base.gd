@@ -13,3 +13,11 @@ func before_each() -> void:
 	Clock.reset()
 	GameState.reset_to_starting_conditions()
 	Sim.reset()
+
+
+func count_rooms(predicate: Callable) -> int:
+	var count := 0
+	for room in GameState.hotel_rooms:
+		if predicate.call(room):
+			count += 1
+	return count
