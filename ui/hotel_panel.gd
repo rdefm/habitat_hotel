@@ -6,21 +6,38 @@ extends VBoxContainer
 ## unlocked Room type; a not-yet-unlocked Room type contributes no row at
 ## all. A Floor's row holds one cell per built instance plus a trailing
 ## Build Slot cell (instance_id -1) while it's still under its instance cap.
-## Clicking an empty/unlocked cell opens Build (scoped to that Floor's Room
-## type) and clicking a built room opens Upgrade -- purely a view over
-## GameState, never mutates it directly; slot_selected lets the caller
-## decide what to do.
+##
+## Two tap modes, switched by whether a Party is selected at Reception
+## (ADR-0001, ticket 05): with no selected_party_id, tapping an
+## empty/unlocked cell opens Build and tapping a built room opens Upgrade,
+## exactly as before -- slot_selected lets the caller decide what to do.
+## With a selected_party_id, every built-room cell instead shows its
+## Sim.match_hint() (green/amber tint; a Build Slot or a "none" cell is
+## never a seating target and does not respond to a tap at all) and tapping
+## a green/amber cell emits seat_attempted instead, leaving Build/Upgrade
+## unreachable until the caller clears the selection.
 ##
 ## Rows and cells are fully rebuilt on every refresh() rather than updated
 ## in place, since the set of visible Floors and built instances changes as
 ## the game progresses.
 
 signal slot_selected(room_type_id: String, instance_id: int)
+signal seat_attempted(party_id: int, room_type_id: String, instance_id: int, hint: String)
 
 const CELL_MIN_SIZE := Vector2(110, 88)
 const ROW_MIN_HEIGHT := 112
 
+const HINT_COLOR := {
+	"green": Color(0.4, 1.0, 0.4),
+	"amber": Color(1.0, 0.75, 0.3),
+}
+const NO_HINT_COLOR := Color(0.4, 0.4, 0.4)
+
 @export var interactive: bool = false
+
+## Set by the caller (main_screen) when a Party is selected at Reception;
+## -1 means no Party is selected and normal Build/Upgrade tapping applies.
+var selected_party_id: int = -1
 
 
 func _ready() -> void:
@@ -83,7 +100,7 @@ func _make_cell(room_type_id: String, room_type: Dictionary, instance_id: int, r
 	if room.is_empty():
 		btn.text = "%s\n(build)" % room_type["name"]
 		btn.disabled = not interactive
-		btn.modulate = Color(1, 1, 1)
+		btn.modulate = NO_HINT_COLOR if selected_party_id != -1 else Color(1, 1, 1)
 		btn.tooltip_text = ""
 		return btn
 
@@ -111,10 +128,21 @@ func _make_cell(room_type_id: String, room_type: Dictionary, instance_id: int, r
 
 	btn.text = "%s #%d%s%s%s" % [room_type["name"], instance_id, suffix, occupant_line]
 	btn.disabled = not interactive
+	if selected_party_id != -1:
+		var hint := Sim.match_hint(selected_party_id, room_type_id, instance_id)
+		modulate_color = HINT_COLOR.get(hint, NO_HINT_COLOR)
 	btn.modulate = modulate_color
 	btn.tooltip_text = tooltip
 	return btn
 
 
 func _on_cell_pressed(room_type_id: String, instance_id: int) -> void:
+	if selected_party_id != -1:
+		if instance_id == -1:
+			return # a Build Slot is never a seating target
+		var hint := Sim.match_hint(selected_party_id, room_type_id, instance_id)
+		if hint == "none":
+			return # a no-highlight Room does not respond to a tap at all
+		seat_attempted.emit(selected_party_id, room_type_id, instance_id, hint)
+		return
 	slot_selected.emit(room_type_id, instance_id)

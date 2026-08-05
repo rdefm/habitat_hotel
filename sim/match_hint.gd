@@ -33,7 +33,7 @@ static func classify(party: Dictionary, room: Dictionary, room_stats: Dictionary
 		return "none"
 	if not _is_affordable(room["room_type_id"], party["budget"], price_multipliers, pricing_balance):
 		return "none"
-	if _tags_cover_needs(room_stats["tags"], party["needs"]):
+	if missing_needs(party, room_stats).is_empty():
 		return "green"
 	return "amber"
 
@@ -52,12 +52,24 @@ static func walk_away_reason(party: Dictionary, hotel_rooms: Array, room_stats_b
 	var vacant: Array = hotel_rooms.filter(func(r): return r["occupant"] == null and not r.get("needs_cleaning", false))
 	var strict_all: Array = vacant.filter(func(r):
 		var rt: Dictionary = room_stats_by_key[room_key(r)]
-		return int(rt["capacity"]) >= int(party["party_size"]) and _tags_cover_needs(rt["tags"], party["needs"])
+		return int(rt["capacity"]) >= int(party["party_size"]) and missing_needs(party, rt).is_empty()
 	)
 	if strict_all.is_empty():
 		return "fully_booked" if vacant.is_empty() else "no_match_available"
 	var strict_affordable: Array = strict_all.filter(func(r): return _is_affordable(r["room_type_id"], party["budget"], price_multipliers, pricing_balance))
 	return "no_match_available" if strict_affordable.size() > 0 else "too_expensive"
+
+
+## The Party's Needs a candidate Room's effective tags don't cover -- what
+## Reception's amber confirmation (ticket 05) names before the player commits
+## to a mismatched seating.
+static func missing_needs(party: Dictionary, room_stats: Dictionary) -> Array:
+	var room_tags: Array = room_stats["tags"]
+	var out: Array = []
+	for need in party["needs"]:
+		if not room_tags.has(need):
+			out.append(need)
+	return out
 
 
 ## The key room_stats_by_key is keyed on for a given hotel_rooms entry.
@@ -72,10 +84,3 @@ static func _is_affordable(room_type_id: String, budget: String, price_multiplie
 	var tolerance: Dictionary = pricing_balance.get("tolerance", {}).get(budget, {})
 	var max_multiplier: float = float(tolerance.get("max_multiplier", 999.0))
 	return current <= max_multiplier
-
-
-static func _tags_cover_needs(room_tags: Array, needs: Array) -> bool:
-	for need in needs:
-		if not room_tags.has(need):
-			return false
-	return true

@@ -112,6 +112,26 @@ func test_classify_ignores_capacity_smaller_than_the_full_party_size() -> void:
 	assert_eq(hint, "green")
 
 
+## --- missing_needs() ---
+
+func test_missing_needs_lists_only_needs_the_room_doesnt_cover() -> void:
+	var party := _party(["cold", "water", "quiet"], 2)
+	var room_stats := {"tags": ["warm", "water"]} # covers water, not cold/quiet
+
+	var missing := MatchHint.missing_needs(party, room_stats)
+
+	assert_eq(missing, ["cold", "quiet"])
+
+
+func test_missing_needs_is_empty_when_every_need_is_covered() -> void:
+	var party := _party(["cold", "water"], 2)
+	var room_stats := {"tags": ["cold", "water", "spacious"]}
+
+	var missing := MatchHint.missing_needs(party, room_stats)
+
+	assert_eq(missing, [])
+
+
 ## --- walk_away_reason() ---
 
 func test_walk_away_reason_is_no_match_available_when_no_room_type_could_ever_fit() -> void:

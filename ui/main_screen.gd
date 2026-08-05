@@ -6,6 +6,8 @@ extends Control
 ## GameState via its public API, never touching Sim internals directly.
 
 const HotelPanel = preload("res://ui/hotel_panel.gd")
+const ReceptionPanel = preload("res://ui/reception_panel.gd")
+const SeatConfirmMenu = preload("res://ui/seat_confirm_menu.gd")
 const BuildMenu = preload("res://ui/build_menu.gd")
 const PricesMenu = preload("res://ui/prices_menu.gd")
 const HireMenu = preload("res://ui/hire_menu.gd")
@@ -35,6 +37,7 @@ var _overlay_title: Label
 var _overlay_body: VBoxContainer
 var _overlay_content: Control
 var _hotel_panel: HotelPanel
+var _reception_panel: ReceptionPanel
 
 
 func _ready() -> void:
@@ -48,6 +51,10 @@ func _ready() -> void:
 	root.add_child(_build_menu_bar())
 	root.add_child(LobbyView.new())
 
+	_reception_panel = ReceptionPanel.new()
+	_reception_panel.party_selected.connect(_on_party_selected)
+	root.add_child(_reception_panel)
+
 	var middle := HBoxContainer.new()
 	middle.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(middle)
@@ -57,6 +64,7 @@ func _ready() -> void:
 	_hotel_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_hotel_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_hotel_panel.slot_selected.connect(_on_hotel_slot_selected)
+	_hotel_panel.seat_attempted.connect(_on_seat_attempted)
 	middle.add_child(_hotel_panel)
 
 	root.add_child(_build_day_log())
@@ -167,6 +175,37 @@ func _on_hotel_slot_selected(room_type_id: String, instance_id: int) -> void:
 		menu.room_type_id = room_type_id
 		menu.instance_id = instance_id
 		open_menu("Upgrade %s #%d" % [room_name, instance_id], menu)
+
+
+## --- Reception (tap a Party, then tap a Room to seat -- ADR-0001, ticket 05) ---
+
+func _on_party_selected(party_id: int) -> void:
+	_hotel_panel.selected_party_id = party_id
+	_hotel_panel.refresh()
+
+
+func _on_seat_attempted(party_id: int, room_type_id: String, instance_id: int, hint: String) -> void:
+	if hint == "green":
+		Sim.seat_party(party_id, room_type_id, instance_id)
+		_finish_seating_flow()
+		return
+
+	var menu := SeatConfirmMenu.new()
+	menu.party_id = party_id
+	menu.room_type_id = room_type_id
+	menu.instance_id = instance_id
+	menu.resolved.connect(func(seated: bool):
+		close_menu()
+		if seated:
+			_finish_seating_flow()
+	)
+	open_menu("Confirm seating", menu)
+
+
+func _finish_seating_flow() -> void:
+	_reception_panel.clear_selection()
+	_hotel_panel.selected_party_id = -1
+	_hotel_panel.refresh()
 
 
 ## --- Day log ---

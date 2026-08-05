@@ -65,6 +65,14 @@ func reset() -> void:
 	_has_forecast = false
 
 
+## Read-only lookup of a pending_arrivals entry by party_id, for UI that
+## needs a Party's fields (species, needs, name, ...) without walking the
+## array itself. Returns {} if no such Party is currently queued.
+func pending_party(party_id: int) -> Dictionary:
+	var idx := _pending_index(party_id)
+	return pending_arrivals[idx] if idx != -1 else {}
+
+
 ## The match-hint (green/amber/none) for seating party_id into the room
 ## addressed by room_type_id + instance_id right now -- pure query, no
 ## admission. See MatchHint.classify().

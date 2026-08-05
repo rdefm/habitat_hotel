@@ -32,7 +32,9 @@
   },
   "patience": {
     "start": 80,
-    "decay_per_tick": 1
+    "decay_per_tick": 1,
+    "impatient_at": 40,
+    "huffy_at": 15
   },
   "pricing": {
     "min_multiplier": 0.6,
