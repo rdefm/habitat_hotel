@@ -1,12 +1,18 @@
 extends Node
 
-## Drives the guest lifecycle (arrive -> match -> stay -> checkout) across
-## the day's phases. Listens to Clock via EventBus; mutates GameState;
-## emits EventBus.day_summary for any view (console, UI, batch tool) to
-## consume. Holds no presentation logic of its own.
+## Drives the guest lifecycle (arrive -> queue -> seat -> stay -> checkout)
+## across the day's phases. Listens to Clock via EventBus; mutates
+## GameState; emits EventBus.day_summary for any view (console, UI, batch
+## tool) to consume. Holds no presentation logic of its own.
+##
+## Seating is manual (ADR-0001, no auto-matcher): arrivals sit in
+## pending_arrivals as a queryable queue of Parties, each with its own
+## decaying Patience, until seat_party() -- the one and only admission path,
+## called by interactive UI or a scripted autopilot alike -- seats them or
+## their Patience runs out and they walk away.
 
 const DemandGenerator = preload("res://sim/demand_generator.gd")
-const Matcher = preload("res://sim/matcher.gd")
+const MatchHint = preload("res://sim/match_hint.gd")
 const Satisfaction = preload("res://sim/satisfaction.gd")
 
 # STAYING guests only, keyed by guest id. Dict: {id, species_id, party_size,
@@ -14,12 +20,26 @@ const Satisfaction = preload("res://sim/satisfaction.gd")
 var guests: Dictionary = {}
 var _next_guest_id: int = 1
 
-var _pending_arrivals: Array = []
+# Arrived, not-yet-(fully)-seated Parties: {id, name, species_id, needs,
+# likes, amenity_prefs, budget, party_size, nights_total, patience}.
+# party_size shrinks as seat_party() carves off room-sized chunks (see
+# ADR-0001's split-across-rooms behavior); the entry is removed once it
+# reaches zero or its Patience expires. Public/queryable -- this queue *is*
+# Reception's UI model, not an internal implementation detail.
+var pending_arrivals: Array = []
+var _next_party_id: int = 1
+
 var _ready_for_checkout: Array = []
 var _day_metrics: Dictionary = {}
 
+# True only while Clock's current phase is MIDDAY -- the window during which
+# pending_arrivals' Patience actually decays tick-by-tick (see
+# _on_tick_advanced()). Arrivals sit with untouched Patience the rest of the
+# day, mirroring the reference prototype's waitTime/patience fields.
+var _midday_active: bool = false
+
 # Tomorrow's arrivals, generated a phase early (at tonight's Night phase) so
-# the player has a real window to react before they're matched. Day 1 has no
+# the player has a real window to react before they're queued. Day 1 has no
 # "last night" to generate from, so _do_morning falls back to generating on
 # the spot exactly once, when _has_forecast is still false.
 var _next_day_forecast: Array = []
@@ -28,6 +48,7 @@ var _has_forecast: bool = false
 
 func _ready() -> void:
 	EventBus.phase_changed.connect(_on_phase_changed)
+	EventBus.tick_advanced.connect(_on_tick_advanced)
 
 
 ## Clears all in-flight guest/day state. Used by the batch runner alongside
@@ -35,32 +56,118 @@ func _ready() -> void:
 func reset() -> void:
 	guests.clear()
 	_next_guest_id = 1
-	_pending_arrivals.clear()
+	pending_arrivals.clear()
+	_next_party_id = 1
+	_midday_active = false
 	_ready_for_checkout.clear()
-	_day_metrics = {}
+	_day_metrics = _fresh_day_metrics()
 	_next_day_forecast.clear()
 	_has_forecast = false
 
 
+## The match-hint (green/amber/none) for seating party_id into the room
+## addressed by room_type_id + instance_id right now -- pure query, no
+## admission. See MatchHint.classify().
+func match_hint(party_id: int, room_type_id: String, instance_id: int) -> String:
+	var idx := _pending_index(party_id)
+	if idx == -1:
+		return "none"
+	var room := GameState.room_instance(room_type_id, instance_id)
+	if room.is_empty():
+		return "none"
+	var room_stats := GameState.effective_room_stats(room)
+	return MatchHint.classify(pending_arrivals[idx], room, room_stats, GameState.price_multipliers, GameState.balance.get("pricing", {}))
+
+
+## The single admission path (ADR-0001): seats as much of party_id as the
+## room addressed by room_type_id + instance_id can hold (its full capacity,
+## or its remaining party_size if smaller), applying the existing green/
+## mismatch handling. Returns false with no side effects if the hint is
+## "none" or either id doesn't resolve. Any unseated remainder stays in
+## pending_arrivals with its Patience unchanged -- see the class doc's note
+## on split-across-rooms.
+func seat_party(party_id: int, room_type_id: String, instance_id: int) -> bool:
+	var idx := _pending_index(party_id)
+	if idx == -1:
+		return false
+	var room := GameState.room_instance(room_type_id, instance_id)
+	if room.is_empty():
+		return false
+	var room_stats := GameState.effective_room_stats(room)
+	var pricing_balance: Dictionary = GameState.balance.get("pricing", {})
+	var hint := MatchHint.classify(pending_arrivals[idx], room, room_stats, GameState.price_multipliers, pricing_balance)
+	if hint == "none":
+		return false
+
+	var party: Dictionary = pending_arrivals[idx]
+	var mismatch := hint == "amber"
+	var chunk_size: int = mini(int(room_stats["capacity"]), int(party["party_size"]))
+	_admit_guest(party, room_type_id, instance_id, mismatch, chunk_size)
+
+	var metric_key := "matched_mismatched" if mismatch else "matched_strict"
+	_day_metrics[metric_key] += 1
+
+	party["party_size"] -= chunk_size
+	if party["party_size"] <= 0:
+		pending_arrivals.remove_at(idx)
+	return true
+
+
 func _on_phase_changed(day: int, phase_name: String) -> void:
+	_midday_active = (phase_name == "MIDDAY")
 	match phase_name:
 		"MORNING":
 			_do_morning(day)
-		"MIDDAY":
-			_do_midday(day)
 		"EVENING":
 			_do_evening(day)
 		"NIGHT":
 			_do_night(day)
 
 
-func _do_morning(day: int) -> void:
-	if not _pending_arrivals.is_empty():
-		push_error("[Sim] %d guest(s) still pending match at start of day %d -- matcher did not resolve them all last Midday." % [_pending_arrivals.size(), day])
-		_pending_arrivals.clear()
+func _on_tick_advanced(_day: int, _tick_in_day: int) -> void:
+	if not _midday_active:
+		return
+	_decay_patience()
 
-	_day_metrics = {
-		"day": day,
+
+func _do_morning(day: int) -> void:
+	if not pending_arrivals.is_empty():
+		push_error("[Sim] %d Party(ies) still pending at start of day %d -- Evening's safety-net expiry should have cleared the queue." % [pending_arrivals.size(), day])
+		pending_arrivals.clear()
+
+	_day_metrics = _fresh_day_metrics()
+
+	for gid in _ready_for_checkout:
+		_checkout_guest(gid)
+	_ready_for_checkout.clear()
+
+	var arrivals: Array
+	if _has_forecast:
+		arrivals = _next_day_forecast
+		_next_day_forecast = []
+		_has_forecast = false
+	else:
+		# Day 1 only -- every later day's arrivals were already forecast last Night.
+		arrivals = DemandGenerator.generate(GameState, Rng)
+
+	for arrival in arrivals:
+		pending_arrivals.append(_new_party(arrival))
+
+	_day_metrics["arrivals"] = pending_arrivals.size()
+	for party in pending_arrivals:
+		var species_id: String = party["species_id"]
+		_day_metrics["arrival_species"][species_id] = int(_day_metrics["arrival_species"].get(species_id, 0)) + 1
+
+
+## Zeroed day-metrics shape, shared by reset() (so seat_party() has
+## somewhere safe to accumulate into even before this day's first Morning
+## has run -- real play never calls it that early since pending_arrivals is
+## always empty until Morning populates it, but tests exercise seat_party()
+## directly against a hand-built Party) and _do_morning() (the real per-day
+## reset).
+func _fresh_day_metrics() -> Dictionary:
+	return {
+		"day": GameState.day,
 		"cash_start": GameState.cash,
 		"arrivals": 0,
 		"matched_strict": 0,
@@ -76,80 +183,85 @@ func _do_morning(day: int) -> void:
 		"turned_away_species": {},
 	}
 
-	for gid in _ready_for_checkout:
-		_checkout_guest(gid)
-	_ready_for_checkout.clear()
 
-	if _has_forecast:
-		_pending_arrivals = _next_day_forecast
-		_next_day_forecast = []
-		_has_forecast = false
-	else:
-		# Day 1 only -- every later day's arrivals were already forecast last Night.
-		_pending_arrivals = DemandGenerator.generate(GameState, Rng)
-
-	_day_metrics["arrivals"] = _pending_arrivals.size()
-	for arrival in _pending_arrivals:
-		var species_id: String = arrival["species_id"]
-		_day_metrics["arrival_species"][species_id] = int(_day_metrics["arrival_species"].get(species_id, 0)) + 1
+func _new_party(arrival: Dictionary) -> Dictionary:
+	var party := arrival.duplicate()
+	party["id"] = _next_party_id
+	_next_party_id += 1
+	party["patience"] = float(GameState.balance["patience"]["start"])
+	return party
 
 
-func _do_midday(_day: int) -> void:
+func _pending_index(party_id: int) -> int:
+	for i in range(pending_arrivals.size()):
+		if int(pending_arrivals[i]["id"]) == party_id:
+			return i
+	return -1
+
+
+func _decay_patience() -> void:
+	var decay: float = float(GameState.balance["patience"]["decay_per_tick"])
+	for party in pending_arrivals:
+		party["patience"] = maxf(0.0, float(party["patience"]) - decay)
+
+	var expired: Array = pending_arrivals.filter(func(p): return float(p["patience"]) <= 0.0)
+	for party in expired:
+		pending_arrivals.erase(party)
+		_walk_away(party)
+
+
+func _walk_away(party: Dictionary) -> void:
 	var pricing_balance: Dictionary = GameState.balance.get("pricing", {})
-	var room_stats_by_key := _effective_stats_by_key()
-	for arrival in _pending_arrivals:
-		var decision := Matcher.decide(arrival, GameState.hotel_rooms, room_stats_by_key, GameState.matcher_policy, GameState.price_multipliers, pricing_balance)
-		match decision["reason"]:
-			"matched_strict":
-				_admit_guest(arrival, decision["room_type_id"], decision["instance_id"], false)
-				_day_metrics["matched_strict"] += 1
-			"matched_mismatch":
-				_admit_guest(arrival, decision["room_type_id"], decision["instance_id"], true)
-				_day_metrics["matched_mismatched"] += 1
-			"no_match_available":
-				# Turned away because no room *type* could meet their needs (strict policy) --
-				# a real service failure, so it stings reputation.
-				GameState.reputation = clampi(GameState.reputation + int(GameState.balance["review"]["reputation_delta_walkaway"]), 0, 100)
-				_day_metrics["walked_away_mismatch"] += 1
-				_track_turned_away(arrival)
-				EventBus.guest_turned_away.emit(arrival["name"], arrival["species_id"], decision["reason"])
-			"fully_booked":
-				# Turned away only because every room is occupied -- being sold out isn't
-				# a service failure, so this doesn't cost reputation.
-				_day_metrics["walked_away_full"] += 1
-				_track_turned_away(arrival)
-				EventBus.guest_turned_away.emit(arrival["name"], arrival["species_id"], decision["reason"])
-			"too_expensive":
-				# Turned away by the player's own pricing choice -- a lost sale, not a
-				# service failure, so this doesn't cost reputation either.
-				_day_metrics["walked_away_too_expensive"] += 1
-				_track_turned_away(arrival)
-				EventBus.guest_turned_away.emit(arrival["name"], arrival["species_id"], decision["reason"])
-	_pending_arrivals.clear()
+	var reason := MatchHint.walk_away_reason(party, GameState.hotel_rooms, _effective_stats_by_key(), GameState.price_multipliers, pricing_balance)
+	match reason:
+		"no_match_available":
+			# A real service failure (no eligible room ever existed, or one
+			# did and simply never got tapped in time) -- stings reputation.
+			GameState.reputation = clampi(GameState.reputation + int(GameState.balance["review"]["reputation_delta_walkaway"]), 0, 100)
+			_day_metrics["walked_away_mismatch"] += 1
+		"fully_booked":
+			# Turned away only because every room is occupied -- being sold out isn't
+			# a service failure, so this doesn't cost reputation.
+			_day_metrics["walked_away_full"] += 1
+		"too_expensive":
+			# Turned away by the player's own pricing choice -- a lost sale, not a
+			# service failure, so this doesn't cost reputation either.
+			_day_metrics["walked_away_too_expensive"] += 1
+	_track_turned_away(party)
+	EventBus.guest_turned_away.emit(party["name"], party["species_id"], reason)
 
 
-func _track_turned_away(arrival: Dictionary) -> void:
-	var species_id: String = arrival["species_id"]
+func _track_turned_away(party: Dictionary) -> void:
+	var species_id: String = party["species_id"]
 	_day_metrics["turned_away_species"][species_id] = int(_day_metrics["turned_away_species"].get(species_id, 0)) + 1
 
 
 ## Base room type stats merged with each instance's purchased upgrades,
-## keyed by Matcher.room_key() (room_type_id + instance_id). Computed fresh
-## each Midday/Night since upgrades can be bought between phases while the
-## clock is paused for a menu.
+## keyed by MatchHint.room_key() (room_type_id + instance_id). Computed
+## fresh whenever needed since upgrades can be bought between phases while
+## the clock is paused for a menu.
 func _effective_stats_by_key() -> Dictionary:
 	var out: Dictionary = {}
 	for room in GameState.hotel_rooms:
-		out[Matcher.room_key(room)] = GameState.effective_room_stats(room)
+		out[MatchHint.room_key(room)] = GameState.effective_room_stats(room)
 	return out
 
 
 ## Meals/incidents arrive in Chunk 5; care-per-night is already folded into
-## match-time satisfaction. This phase also doubles as the housekeeping
+## seat-time satisfaction. This phase also doubles as the housekeeping
 ## turnover point: any room left dirty by a Morning checkout is cleaned here,
-## so it's unavailable to Midday's matcher for the rest of that day and
-## ready again next day.
+## so it's unavailable for seating for the rest of that day and ready again
+## next day.
+##
+## Any pending_arrivals entry still here despite Midday's tick-by-tick decay
+## (Patience's configured start is well under Midday's tick count, so this
+## should never actually fire) is force-expired as a defensive safety net --
+## nothing should be able to carry an unresolved Party across a day boundary.
 func _do_evening(_day: int) -> void:
+	for party in pending_arrivals:
+		_walk_away(party)
+	pending_arrivals.clear()
+
 	for room in GameState.hotel_rooms:
 		if room.get("needs_cleaning", false):
 			room["needs_cleaning"] = false
@@ -194,30 +306,30 @@ func _do_night(day: int) -> void:
 	EventBus.forecast_ready.emit(day + 1, _next_day_forecast.duplicate())
 
 
-func _admit_guest(arrival: Dictionary, room_type_id: String, instance_id: int, mismatch: bool) -> void:
+func _admit_guest(party: Dictionary, room_type_id: String, instance_id: int, mismatch: bool, chunk_size: int) -> void:
 	var room: Dictionary = GameState.room_instance(room_type_id, instance_id)
 	var room_stats := GameState.effective_room_stats(room)
-	var sat := Satisfaction.compute(arrival, room_stats, GameState.hotel_amenities, GameState.balance)
+	var sat := Satisfaction.compute(party, room_stats, GameState.hotel_amenities, GameState.balance)
 
 	var gid := _next_guest_id
 	_next_guest_id += 1
 	guests[gid] = {
 		"id": gid,
-		"name": arrival["name"],
-		"species_id": arrival["species_id"],
-		"party_size": arrival["party_size"],
-		"nights_total": arrival["nights_total"],
-		"nights_remaining": arrival["nights_total"],
+		"name": party["name"],
+		"species_id": party["species_id"],
+		"party_size": chunk_size,
+		"nights_total": party["nights_total"],
+		"nights_remaining": party["nights_total"],
 		"room_type_id": room_type_id,
 		"room_instance_id": instance_id,
 		"satisfaction": sat,
 		"mismatch": mismatch,
 	}
 	room["occupant"] = gid
-	room["occupant_name"] = arrival["name"]
-	room["occupant_species_id"] = arrival["species_id"]
+	room["occupant_name"] = party["name"]
+	room["occupant_species_id"] = party["species_id"]
 	room["occupant_mismatch"] = mismatch
-	EventBus.guest_seated.emit(arrival["name"], arrival["species_id"], room_type_id, instance_id, mismatch)
+	EventBus.guest_seated.emit(party["name"], party["species_id"], room_type_id, instance_id, mismatch)
 
 
 func _checkout_guest(gid: int) -> void:

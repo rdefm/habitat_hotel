@@ -21,3 +21,23 @@ func count_rooms(predicate: Callable) -> int:
 		if predicate.call(room):
 			count += 1
 	return count
+
+
+## A hand-built pending-arrival Party dict, for tests that drive
+## Sim.seat_party()/Sim.match_hint() directly rather than depending on
+## DemandGenerator's RNG-derived arrivals. Doesn't append it to
+## Sim.pending_arrivals -- callers do that (or override fields first) since
+## some tests want the party_size/nights_total tuned per case.
+func make_party(id: int, needs: Array, party_size: int = 2, budget: String = "low", nights_total: int = 2) -> Dictionary:
+	return {
+		"id": id,
+		"name": "Test Guest %d" % id,
+		"species_id": "test_species",
+		"needs": needs,
+		"likes": [],
+		"amenity_prefs": [],
+		"budget": budget,
+		"party_size": party_size,
+		"nights_total": nights_total,
+		"patience": float(GameState.balance["patience"]["start"]),
+	}

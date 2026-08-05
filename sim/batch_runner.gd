@@ -18,17 +18,19 @@ const CSV_COLUMNS := [
 ]
 
 
-## seed_value/policy default to -1/"" as sentinels (rather than referencing
-## the Rng/GameState autoload constants directly, which GDScript can't treat
-## as constant default-argument expressions); callers that omit them get
-## Rng's and GameState's own defaults.
-static func run(days: int, csv_path: String = DEFAULT_CSV_PATH, seed_value: int = -1, policy: String = "") -> Array:
+## seed_value defaults to -1 as a sentinel (rather than referencing the Rng
+## autoload constant directly, which GDScript can't treat as a constant
+## default-argument expression); callers that omit it get Rng's own default.
+##
+## Arrivals are seated the same manual way interactive play seats them (see
+## ADR-0001/Sim.seat_party()) -- until a scripted autopilot is wired up to
+## call it (see .scratch/direct-manipulation-core-loop/issues/06-batch-runner-autopilot.md),
+## nothing here seats anyone, so a run simply characterizes every arrival
+## walking away on expired Patience.
+static func run(days: int, csv_path: String = DEFAULT_CSV_PATH, seed_value: int = -1) -> Array:
 	Rng.reset(seed_value) if seed_value >= 0 else Rng.reset()
 	Clock.reset()
-	if policy.is_empty():
-		GameState.reset_to_starting_conditions()
-	else:
-		GameState.reset_to_starting_conditions(policy)
+	GameState.reset_to_starting_conditions()
 	Sim.reset()
 
 	var rows: Array = []

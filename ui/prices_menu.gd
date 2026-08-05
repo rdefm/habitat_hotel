@@ -3,7 +3,7 @@ extends VBoxContainer
 
 ## Prices menu: adjust each unlocked room type's price multiplier. Pricier
 ## rooms earn more per stay but price out guests whose budget tier can't
-## tolerate the markup (see Matcher's "too_expensive" walk-away reason).
+## tolerate the markup (see MatchHint's "too_expensive" walk-away reason).
 
 var _rows: Dictionary = {} # room_type_id -> {mult_label, rate_label}
 

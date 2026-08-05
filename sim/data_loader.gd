@@ -223,6 +223,7 @@ const BALANCE_REQUIRED_SECTIONS := {
 	"hearts": ["threshold", "step", "max"],
 	"demand": ["base_min", "base_max", "reputation_weight_min", "reputation_weight_max"],
 	"costs": ["staff_wage_per_day"],
+	"patience": ["start", "decay_per_tick"],
 	"pricing": ["min_multiplier", "max_multiplier", "step", "default_multiplier", "tolerance"],
 }
 

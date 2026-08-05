@@ -30,6 +30,10 @@
   "costs": {
     "staff_wage_per_day": 175
   },
+  "patience": {
+    "start": 80,
+    "decay_per_tick": 1
+  },
   "pricing": {
     "min_multiplier": 0.6,
     "max_multiplier": 1.8,

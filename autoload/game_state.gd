@@ -12,7 +12,6 @@ const STARTING_HEARTS := 0
 const STARTING_REPUTATION := 50
 const STARTING_STARS := 1
 const STARTING_SEASON := "summer"
-const DEFAULT_MATCHER_POLICY := "fill_vacancies" # or "strict_match"
 
 var cash: int = STARTING_CASH
 var hearts: int = STARTING_HEARTS
@@ -20,7 +19,6 @@ var reputation: int = STARTING_REPUTATION
 var stars: int = STARTING_STARS
 var day: int = 1
 var season: String = STARTING_SEASON
-var matcher_policy: String = DEFAULT_MATCHER_POLICY
 
 # Loaded once from data/*.json, treated as read-only content.
 var tags: Dictionary = {}
@@ -33,7 +31,7 @@ var names: Dictionary = {}
 var _starting_hotel_template: Array = []
 
 # Mutable hotel instance state: Array of {room_type_id, instance_id, occupant
-# (guest id or null)}. Only ever contains BUILT rooms -- Sim/Matcher never
+# (guest id or null)}. Only ever contains BUILT rooms -- Sim/MatchHint never
 # need to know about locked or unbuilt Floors/Build Slots, that's purely a
 # Build-menu concern. instance_id is stable and scoped to room_type_id (0,
 # 1, 2, ... in build order); together they're the addressing scheme every
@@ -81,18 +79,17 @@ func _load_data() -> void:
 	EventBus.data_loaded.emit()
 
 
-## Restores cash/hearts/reputation/stars/day/season/policy and the hotel's
-## room layout to their day-1 starting values. Does not touch loaded content
+## Restores cash/hearts/reputation/stars/day/season and the hotel's room
+## layout to their day-1 starting values. Does not touch loaded content
 ## (species/rooms/tags/etc.) or the Clock -- callers that need a fully clean
 ## run (e.g. the batch runner) should also call Clock.reset() and Rng.reset().
-func reset_to_starting_conditions(policy: String = DEFAULT_MATCHER_POLICY) -> void:
+func reset_to_starting_conditions() -> void:
 	cash = STARTING_CASH
 	hearts = STARTING_HEARTS
 	reputation = STARTING_REPUTATION
 	stars = STARTING_STARS
 	day = 1
 	season = STARTING_SEASON
-	matcher_policy = policy
 	hotel_amenities.clear()
 	_build_starting_hotel()
 	_reset_price_multipliers()
@@ -208,7 +205,7 @@ func build_room(room_type_id: String) -> bool:
 ## --- Upgrade queries, used by the Upgrade menu ---
 
 ## Merges a room instance's base type stats with the effects of every
-## upgrade it has purchased. This is what Matcher/Satisfaction/Sim's upkeep
+## upgrade it has purchased. This is what MatchHint/Satisfaction/Sim's upkeep
 ## calc should always read instead of GameState.rooms[...] directly, since
 ## two instances of the same room type can have different upgrades.
 func effective_room_stats(room: Dictionary) -> Dictionary:

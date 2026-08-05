@@ -50,8 +50,17 @@ func _ensure_started() -> void:
 ## Synchronously simulates exactly one full day's worth of ticks, ignoring
 ## real time and the paused flag. Used by the headless batch runner.
 func force_advance_day() -> void:
+	force_advance_ticks(TICKS_PER_DAY)
+
+
+## Synchronously simulates exactly n ticks, ignoring real time and the
+## paused flag. The lower-granularity primitive force_advance_day() is built
+## on -- useful headlessly for tests that need to land mid-phase (e.g.
+## seating a Party partway through Midday, before its Patience has fully
+## decayed).
+func force_advance_ticks(n: int) -> void:
 	_ensure_started()
-	for i in range(TICKS_PER_DAY):
+	for i in range(n):
 		_advance_tick()
 
 
