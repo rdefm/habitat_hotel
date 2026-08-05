@@ -1,32 +1,30 @@
 class_name HotelPanel
-extends GridContainer
+extends VBoxContainer
 
-## Visual grid over the hotel's built room instances, addressed by
-## room_type_id + per-type instance_id (ADR-0004) instead of a flat slot
-## index. A not-yet-unlocked Room type shows no cells at all; an unlocked
-## one shows one cell per built instance plus a Build Slot cell (instance_id
-## -1) while it's still under its instance cap. Clicking an empty/unlocked
-## cell opens Build (scoped to that Floor's Room type) and clicking a built
-## room opens Upgrade -- purely a view over GameState, never mutates it
-## directly; slot_selected lets the caller decide what to do.
+## Visual elevation of the hotel's built room instances, addressed by
+## room_type_id + per-type instance_id (ADR-0004). One row (Floor) per
+## unlocked Room type; a not-yet-unlocked Room type contributes no row at
+## all. A Floor's row holds one cell per built instance plus a trailing
+## Build Slot cell (instance_id -1) while it's still under its instance cap.
+## Clicking an empty/unlocked cell opens Build (scoped to that Floor's Room
+## type) and clicking a built room opens Upgrade -- purely a view over
+## GameState, never mutates it directly; slot_selected lets the caller
+## decide what to do.
 ##
-## Cells are fully rebuilt on every refresh() rather than updated in place,
-## since (unlike the old fixed 18-slot grid) the number of cells now grows
-## as Floors are unlocked and built out. A proper per-Floor row layout is
-## ticket 03's job -- this is still a flat grid, just addressed differently.
+## Rows and cells are fully rebuilt on every refresh() rather than updated
+## in place, since the set of visible Floors and built instances changes as
+## the game progresses.
 
 signal slot_selected(room_type_id: String, instance_id: int)
 
-const COLUMNS := 6
 const CELL_MIN_SIZE := Vector2(110, 88)
+const ROW_MIN_HEIGHT := 112
 
 @export var interactive: bool = false
 
 
 func _ready() -> void:
-	columns = COLUMNS
-	add_theme_constant_override("h_separation", 4)
-	add_theme_constant_override("v_separation", 4)
+	add_theme_constant_override("separation", 8)
 	refresh()
 	EventBus.day_summary.connect(func(_s): refresh())
 	EventBus.room_marked_dirty.connect(func(_t, _i): refresh())
@@ -42,21 +40,45 @@ func refresh() -> void:
 	for room_type_id in room_type_ids:
 		if not GameState.can_build_room_type(room_type_id):
 			continue
-		var count := GameState.floor_instance_count(room_type_id)
-		for instance_id in range(count):
-			add_child(_make_cell(room_type_id, instance_id, GameState.room_instance(room_type_id, instance_id)))
-		if GameState.can_build_more(room_type_id):
-			add_child(_make_cell(room_type_id, -1, {}))
+		add_child(_make_floor_row(room_type_id))
 
 
-func _make_cell(room_type_id: String, instance_id: int, room: Dictionary) -> Button:
+func _make_floor_row(room_type_id: String) -> Control:
+	var room_type: Dictionary = GameState.rooms[room_type_id]
+
+	var floor_box := VBoxContainer.new()
+	floor_box.add_theme_constant_override("separation", 2)
+
+	var label := Label.new()
+	label.text = room_type["name"]
+	label.add_theme_font_size_override("font_size", 16)
+	floor_box.add_child(label)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, ROW_MIN_HEIGHT)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	floor_box.add_child(scroll)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	scroll.add_child(row)
+
+	var count := GameState.floor_instance_count(room_type_id)
+	for instance_id in range(count):
+		row.add_child(_make_cell(room_type_id, room_type, instance_id, GameState.room_instance(room_type_id, instance_id)))
+	if GameState.can_build_more(room_type_id):
+		row.add_child(_make_cell(room_type_id, room_type, -1, {}))
+
+	return floor_box
+
+
+func _make_cell(room_type_id: String, room_type: Dictionary, instance_id: int, room: Dictionary) -> Button:
 	var btn := Button.new()
 	btn.custom_minimum_size = CELL_MIN_SIZE
 	btn.toggle_mode = false
 	btn.clip_text = true
 	btn.pressed.connect(_on_cell_pressed.bind(room_type_id, instance_id))
-
-	var room_type: Dictionary = GameState.rooms[room_type_id]
 
 	if room.is_empty():
 		btn.text = "%s\n(build)" % room_type["name"]
