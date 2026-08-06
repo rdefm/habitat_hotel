@@ -6,6 +6,7 @@ extends Node
 ## loaded data, used both at boot and by the headless batch runner.
 
 const DataLoader = preload("res://sim/data_loader.gd")
+const Station = preload("res://sim/station.gd")
 
 const STARTING_CASH := 5000
 const STARTING_HEARTS := 0
@@ -28,7 +29,23 @@ var traits: Dictionary = {}
 var seasons: Dictionary = {}
 var balance: Dictionary = {}
 var names: Dictionary = {}
+var staffers: Dictionary = {}
 var _starting_hotel_template: Array = []
+
+# Mutable Roster/Station assignment: Station.IDS' id -> Array of assigned
+# Staffer ids (a Station holds a list, not a single slot -- ADR-0005). Reset
+# to DEFAULT_STATION_ASSIGNMENTS alongside the rest of session state.
+var stations: Dictionary = {}
+
+# Mirrors the reference prototype's starting coverage: Biscuit on Reception,
+# Marlon on Bellhop, Shelly on Housekeeping, Kitchen empty until ticket 09
+# gives it something to gate.
+const DEFAULT_STATION_ASSIGNMENTS := {
+	"reception": ["biscuit"],
+	"bellhop": ["marlon"],
+	"housekeeping": ["shelly"],
+	"kitchen": [],
+}
 
 # Mutable hotel instance state: Array of {room_type_id, instance_id, occupant
 # (guest id or null)}. Only ever contains BUILT rooms -- Sim/MatchHint never
@@ -76,6 +93,7 @@ func _load_data() -> void:
 	balance = data["balance"]
 	_starting_hotel_template = data["starting_hotel"]
 	names = data["names"]
+	staffers = data["staffers"]
 	EventBus.data_loaded.emit()
 
 
@@ -93,6 +111,7 @@ func reset_to_starting_conditions() -> void:
 	hotel_amenities.clear()
 	_build_starting_hotel()
 	_reset_price_multipliers()
+	_reset_stations()
 	day_history.clear()
 	review_history.clear()
 	upcoming_arrivals.clear()
@@ -132,6 +151,8 @@ func _new_room_instance(room_type_id: String, instance_id: int) -> Dictionary:
 		"occupant_mismatch": false,
 		"upgrades": [],
 		"needs_cleaning": false,
+		"checking_in": false,
+		"checkin_ticks_remaining": 0,
 	}
 
 
@@ -140,6 +161,13 @@ func _reset_price_multipliers() -> void:
 	var default_mult: float = float(balance.get("pricing", {}).get("default_multiplier", 1.0))
 	for room_type_id in rooms.keys():
 		price_multipliers[room_type_id] = default_mult
+
+
+func _reset_stations() -> void:
+	stations.clear()
+	for station_id in Station.IDS:
+		var defaults: Array = DEFAULT_STATION_ASSIGNMENTS.get(station_id, [])
+		stations[station_id] = defaults.duplicate()
 
 
 func _on_day_advanced(new_day: int) -> void:
@@ -284,3 +312,40 @@ func set_price_multiplier(room_type_id: String, value: float) -> float:
 	var clamped := clampf(value, float(pricing.get("min_multiplier", 0.5)), float(pricing.get("max_multiplier", 2.0)))
 	price_multipliers[room_type_id] = clamped
 	return clamped
+
+
+## --- Roster/Station queries, used by Sim.assign_staffer() and the Roster menu ---
+
+## The Staffer ids currently assigned to station_id. Empty for an unstaffed
+## Station or an unknown station_id.
+func station_staffers(station_id: String) -> Array:
+	return stations.get(station_id, [])
+
+
+func is_station_staffed(station_id: String) -> bool:
+	return not station_staffers(station_id).is_empty()
+
+
+## The Station staffer_id is currently assigned to, or "" if unassigned/unknown.
+func staffer_station(staffer_id: String) -> String:
+	for station_id in stations.keys():
+		if stations[station_id].has(staffer_id):
+			return station_id
+	return ""
+
+
+## Pure data mutation: moves staffer_id into station_id, removing it from
+## wherever it was assigned before. Returns false (no effect) for an unknown
+## Staffer or Station id. Interrupting whatever in-flight job the Staffer was
+## mid-way through is Sim.assign_staffer()'s job, not this one's -- GameState
+## has no notion of in-flight jobs.
+func reassign_staffer(staffer_id: String, station_id: String) -> bool:
+	if not staffers.has(staffer_id) or not Station.is_valid(station_id):
+		return false
+	var current := staffer_station(staffer_id)
+	if current == station_id:
+		return true
+	if current != "":
+		stations[current].erase(staffer_id)
+	stations[station_id].append(staffer_id)
+	return true

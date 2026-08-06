@@ -1,0 +1,17 @@
+[
+  {
+    "id": "biscuit",
+    "name": "Biscuit",
+    "skills": { "reception": 5, "bellhop": 2, "housekeeping": 2, "kitchen": 1 }
+  },
+  {
+    "id": "marlon",
+    "name": "Marlon",
+    "skills": { "reception": 2, "bellhop": 5, "housekeeping": 3, "kitchen": 3 }
+  },
+  {
+    "id": "shelly",
+    "name": "Shelly",
+    "skills": { "reception": 1, "bellhop": 1, "housekeeping": 5, "kitchen": 2 }
+  }
+]

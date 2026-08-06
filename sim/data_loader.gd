@@ -5,6 +5,8 @@ extends RefCounted
 ## required fields and tag references. Malformed entries are logged via
 ## push_error() and skipped rather than crashing the loader.
 
+const Station = preload("res://sim/station.gd")
+
 const DATA_DIR := "res://data/"
 
 const SPECIES_REQUIRED_FIELDS := [
@@ -19,6 +21,8 @@ const ROOM_REQUIRED_FIELDS := [
 
 const TRAIT_REQUIRED_FIELDS := ["id", "name", "description"]
 
+const STAFFER_REQUIRED_FIELDS := ["id", "name", "skills"]
+
 
 static func load_all() -> Dictionary:
 	var tags := load_tags()
@@ -29,6 +33,7 @@ static func load_all() -> Dictionary:
 	var balance := load_balance()
 	var starting_hotel := load_starting_hotel(rooms)
 	var names := load_names(species)
+	var staffers := load_staffers()
 	return {
 		"tags": tags,
 		"species": species,
@@ -38,6 +43,7 @@ static func load_all() -> Dictionary:
 		"balance": balance,
 		"starting_hotel": starting_hotel,
 		"names": names,
+		"staffers": staffers,
 	}
 
 
@@ -188,6 +194,45 @@ static func _validate_trait(entry: Dictionary) -> bool:
 	return true
 
 
+## The fixed authored Roster (ADR-0002/0005): a Skill (1-5) rating at every
+## Station, lopsided toward a home specialty. No hiring/firing/generation --
+## unknown/malformed entries are just skipped like every other loader here.
+static func load_staffers() -> Dictionary:
+	var raw: Variant = _read_json("staffers.json")
+	var out := {}
+	if raw == null:
+		return out
+	if not (raw is Array):
+		push_error("[DataLoader] staffers.json must be a JSON array of objects")
+		return out
+	for entry in raw:
+		if entry is Dictionary and _validate_staffer(entry):
+			out[entry["id"]] = entry
+	return out
+
+
+static func _validate_staffer(entry: Dictionary) -> bool:
+	for field in STAFFER_REQUIRED_FIELDS:
+		if not entry.has(field):
+			push_error("[DataLoader] staffer entry missing '%s': %s" % [field, JSON.stringify(entry)])
+			return false
+	if not (entry["skills"] is Dictionary):
+		push_error("[DataLoader] staffer '%s' skills must be an object" % entry["id"])
+		return false
+	for station_id in Station.IDS:
+		if not entry["skills"].has(station_id):
+			push_error("[DataLoader] staffer '%s' skills missing Station '%s'" % [entry["id"], station_id])
+			return false
+		var skill: Variant = entry["skills"][station_id]
+		if typeof(skill) != TYPE_FLOAT and typeof(skill) != TYPE_INT:
+			push_error("[DataLoader] staffer '%s' skill at '%s' must be a number" % [entry["id"], station_id])
+			return false
+		if int(skill) < 1 or int(skill) > 5:
+			push_error("[DataLoader] staffer '%s' skill at '%s' must be 1-5" % [entry["id"], station_id])
+			return false
+	return true
+
+
 static func load_seasons(valid_tags: Dictionary) -> Dictionary:
 	var raw: Variant = _read_json("seasons.json")
 	var out := {}
@@ -225,6 +270,7 @@ const BALANCE_REQUIRED_SECTIONS := {
 	"costs": ["staff_wage_per_day"],
 	"patience": ["start", "decay_per_tick"],
 	"pricing": ["min_multiplier", "max_multiplier", "step", "default_multiplier", "tolerance"],
+	"stations": ["reception", "bellhop", "housekeeping"],
 }
 
 

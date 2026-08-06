@@ -10,10 +10,18 @@ extends Node
 ## decaying Patience, until seat_party() -- the one and only admission path,
 ## called by interactive UI or a scripted autopilot alike -- seats them or
 ## their Patience runs out and they walk away.
+##
+## Staffers are freely reassignable across the four Stations (ADR-0005) via
+## assign_staffer() -- GameState.stations holds the assignment, this file
+## drives the effect of (un)staffing each one: Reception's Patience decay
+## rate, Bellhop's check-in delay, and Housekeeping's per-Staffer cleaning
+## jobs (_tick_housekeeping()/_tick_checkins()). Kitchen assignment is
+## tracked but has no gated effect yet -- that lands with Dining in ticket 09.
 
 const DemandGenerator = preload("res://sim/demand_generator.gd")
 const MatchHint = preload("res://sim/match_hint.gd")
 const Satisfaction = preload("res://sim/satisfaction.gd")
+const Station = preload("res://sim/station.gd")
 
 # STAYING guests only, keyed by guest id. Dict: {id, species_id, party_size,
 # nights_total, nights_remaining, room_type_id, room_instance_id, satisfaction, mismatch}.
@@ -45,6 +53,14 @@ var _midday_active: bool = false
 var _next_day_forecast: Array = []
 var _has_forecast: bool = false
 
+# Housekeeping's in-flight jobs (ADR-0005), one per active Staffer:
+# staffer_id -> {room_type_id, instance_id, ticks_remaining}. Every assigned
+# Housekeeping Staffer cleans a different Room in parallel. Reassigning a
+# Staffer away drops their own entry here without touching any other
+# Staffer's job or the target Room's needs_cleaning -- it was already true
+# and stays true, so no partial credit for an abandoned job.
+var _cleaning_jobs: Dictionary = {}
+
 
 func _ready() -> void:
 	EventBus.phase_changed.connect(_on_phase_changed)
@@ -63,6 +79,7 @@ func reset() -> void:
 	_day_metrics = _fresh_day_metrics()
 	_next_day_forecast.clear()
 	_has_forecast = false
+	_cleaning_jobs.clear()
 
 
 ## Read-only lookup of a pending_arrivals entry by party_id, for UI that
@@ -121,6 +138,26 @@ func seat_party(party_id: int, room_type_id: String, instance_id: int) -> bool:
 	return true
 
 
+## The single Staffer<->Station reassignment path (ADR-0005): moves
+## staffer_id into station_id, dropping it from wherever it was assigned
+## before. If staffer_id had an in-flight Housekeeping job and is actually
+## moving to a different Station, that job is abandoned (see
+## _cleaning_jobs' doc comment) without touching any other Staffer's job.
+## Returns false with no effect for an unknown Staffer or Station id.
+func assign_staffer(staffer_id: String, station_id: String) -> bool:
+	if not GameState.staffers.has(staffer_id) or not Station.is_valid(station_id):
+		return false
+	if GameState.staffer_station(staffer_id) != station_id:
+		_cleaning_jobs.erase(staffer_id)
+	return GameState.reassign_staffer(staffer_id, station_id)
+
+
+## Read-only lookup of a Housekeeping Staffer's in-flight job, for UI/tests.
+## Returns {} if that Staffer isn't currently cleaning anything.
+func cleaning_job(staffer_id: String) -> Dictionary:
+	return _cleaning_jobs.get(staffer_id, {})
+
+
 func _on_phase_changed(day: int, phase_name: String) -> void:
 	_midday_active = (phase_name == "MIDDAY")
 	match phase_name:
@@ -133,6 +170,8 @@ func _on_phase_changed(day: int, phase_name: String) -> void:
 
 
 func _on_tick_advanced(_day: int, _tick_in_day: int) -> void:
+	_tick_housekeeping()
+	_tick_checkins()
 	if not _midday_active:
 		return
 	_decay_patience()
@@ -207,8 +246,13 @@ func _pending_index(party_id: int) -> int:
 	return -1
 
 
+## An unstaffed Reception Station burns Patience faster (ADR-0005) -- a flat
+## data-driven multiplier on presence, not scaled by Skill (mirrors the
+## reference prototype's RECEPTION_UNSTAFFED_PATIENCE_MULTIPLIER).
 func _decay_patience() -> void:
 	var decay: float = float(GameState.balance["patience"]["decay_per_tick"])
+	if not GameState.is_station_staffed("reception"):
+		decay *= float(_station_balance("reception").get("unstaffed_patience_multiplier", 1.0))
 	for party in pending_arrivals:
 		party["patience"] = maxf(0.0, float(party["patience"]) - decay)
 
@@ -255,11 +299,15 @@ func _effective_stats_by_key() -> Dictionary:
 	return out
 
 
+## data/balance.json's stations.<station_id> tuning block, or {} if absent.
+func _station_balance(station_id: String) -> Dictionary:
+	return GameState.balance.get("stations", {}).get(station_id, {})
+
+
 ## Meals/incidents arrive in Chunk 5; care-per-night is already folded into
-## seat-time satisfaction. This phase also doubles as the housekeeping
-## turnover point: any room left dirty by a Morning checkout is cleaned here,
-## so it's unavailable for seating for the rest of that day and ready again
-## next day.
+## seat-time satisfaction. Housekeeping's turnover no longer happens here in
+## a single bulk sweep -- see _tick_housekeeping(), which drains dirty Rooms
+## continuously across the whole day as each assigned Staffer frees up.
 ##
 ## Any pending_arrivals entry still here despite Midday's tick-by-tick decay
 ## (Patience's configured start is well under Midday's tick count, so this
@@ -270,10 +318,79 @@ func _do_evening(_day: int) -> void:
 		_walk_away(party)
 	pending_arrivals.clear()
 
-	for room in GameState.hotel_rooms:
-		if room.get("needs_cleaning", false):
+
+## Parallel per-Staffer cleaning (ADR-0005): every Housekeeping Staffer not
+## already mid-job claims the next dirty, unclaimed Room and works it down
+## over a Skill-dependent number of ticks (data/balance.json's
+## stations.housekeeping.clean_ticks_by_skill). An unstaffed Housekeeping
+## Station simply never drains the queue -- dirty Rooms stay dirty
+## indefinitely, same as the reference prototype -- so leaving the Station
+## empty has a real, visible cost rather than a deadline that bails it out.
+func _tick_housekeeping() -> void:
+	var clean_ticks_by_skill: Dictionary = _station_balance("housekeeping").get("clean_ticks_by_skill", {})
+	var default_ticks: int = int(_station_balance("housekeeping").get("default_clean_ticks", 32))
+
+	for staffer_id in GameState.station_staffers("housekeeping"):
+		if _cleaning_jobs.has(staffer_id):
+			continue
+		var room := _next_dirty_unclaimed_room()
+		if room.is_empty():
+			continue
+		var skill: int = int(GameState.staffers[staffer_id]["skills"]["housekeeping"])
+		var ticks: int = int(clean_ticks_by_skill.get(str(skill), default_ticks))
+		_cleaning_jobs[staffer_id] = {
+			"room_type_id": room["room_type_id"],
+			"instance_id": int(room["instance_id"]),
+			"ticks_remaining": ticks,
+		}
+
+	for staffer_id in _cleaning_jobs.keys().duplicate():
+		var job: Dictionary = _cleaning_jobs[staffer_id]
+		job["ticks_remaining"] = int(job["ticks_remaining"]) - 1
+		if job["ticks_remaining"] > 0:
+			continue
+		var room := GameState.room_instance(job["room_type_id"], job["instance_id"])
+		if not room.is_empty():
 			room["needs_cleaning"] = false
 			EventBus.room_cleaned.emit(room["room_type_id"], int(room["instance_id"]))
+		_cleaning_jobs.erase(staffer_id)
+
+
+## The first dirty Room (in hotel_rooms order) no in-flight cleaning job is
+## already targeting -- what a Housekeeping Staffer who just freed up picks
+## up next. Returns {} if there's nothing left to claim.
+func _next_dirty_unclaimed_room() -> Dictionary:
+	var claimed: Dictionary = {}
+	for job in _cleaning_jobs.values():
+		claimed[MatchHint.room_key(job)] = true
+	for room in GameState.hotel_rooms:
+		if room.get("needs_cleaning", false) and not claimed.has(MatchHint.room_key(room)):
+			return room
+	return {}
+
+
+## Bellhop coverage is evaluated once, at the moment of admission (mirrors
+## the reference prototype): a staffed Bellhop moves a guest straight in, an
+## unstaffed one leaves the Room "checking_in" for a flat data-driven delay
+## (stations.bellhop.unstaffed_checkin_delay_ticks). Presence-only, same as
+## Reception's Patience multiplier -- Skill doesn't modulate this.
+func _start_checkin(room: Dictionary) -> void:
+	if GameState.is_station_staffed("bellhop"):
+		room["checking_in"] = false
+		room["checkin_ticks_remaining"] = 0
+		return
+	room["checking_in"] = true
+	room["checkin_ticks_remaining"] = int(_station_balance("bellhop").get("unstaffed_checkin_delay_ticks", 0))
+
+
+func _tick_checkins() -> void:
+	for room in GameState.hotel_rooms:
+		if not room.get("checking_in", false):
+			continue
+		room["checkin_ticks_remaining"] = int(room["checkin_ticks_remaining"]) - 1
+		if room["checkin_ticks_remaining"] <= 0:
+			room["checking_in"] = false
+			room["checkin_ticks_remaining"] = 0
 
 
 func _do_night(day: int) -> void:
@@ -337,6 +454,7 @@ func _admit_guest(party: Dictionary, room_type_id: String, instance_id: int, mis
 	room["occupant_name"] = party["name"]
 	room["occupant_species_id"] = party["species_id"]
 	room["occupant_mismatch"] = mismatch
+	_start_checkin(room)
 	EventBus.guest_seated.emit(party["name"], party["species_id"], room_type_id, instance_id, mismatch)
 
 

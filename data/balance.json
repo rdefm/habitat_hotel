@@ -46,5 +46,17 @@
       "mid": {"max_multiplier": 1.3},
       "high": {"max_multiplier": 1.8}
     }
+  },
+  "stations": {
+    "reception": {
+      "unstaffed_patience_multiplier": 1.6
+    },
+    "bellhop": {
+      "unstaffed_checkin_delay_ticks": 16
+    },
+    "housekeeping": {
+      "clean_ticks_by_skill": {"1": 40, "2": 32, "3": 26, "4": 20, "5": 16},
+      "default_clean_ticks": 32
+    }
   }
 }
