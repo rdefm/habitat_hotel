@@ -13,6 +13,6 @@ func _ready() -> void:
 		"The weekly hire pool isn't open yet -- named candidates, traits, and "
 		+ "quality scaling with your star level arrive in Chunk 4.\n\n"
 		+ "For now, your starting staff are covered by a flat daily wage "
-		+ "(see the Staff menu)."
+		+ "(see the Roster menu)."
 	)
 	add_child(label)

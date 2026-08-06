@@ -11,7 +11,7 @@ const SeatConfirmMenu = preload("res://ui/seat_confirm_menu.gd")
 const BuildMenu = preload("res://ui/build_menu.gd")
 const PricesMenu = preload("res://ui/prices_menu.gd")
 const HireMenu = preload("res://ui/hire_menu.gd")
-const StaffMenu = preload("res://ui/staff_menu.gd")
+const RosterMenu = preload("res://ui/roster_menu.gd")
 const ReportsMenu = preload("res://ui/reports_menu.gd")
 const ReviewsMenu = preload("res://ui/reviews_menu.gd")
 const UpgradeMenu = preload("res://ui/upgrade_menu.gd")
@@ -146,7 +146,7 @@ func _build_menu_bar() -> HBoxContainer:
 	var entries := [
 		["Prices", func(): return PricesMenu.new()],
 		["Hire", func(): return HireMenu.new()],
-		["Staff", func(): return StaffMenu.new()],
+		["Roster", func(): return RosterMenu.new()],
 		["Reports", func(): return ReportsMenu.new()],
 		["Reviews", func(): return ReviewsMenu.new()],
 	]
