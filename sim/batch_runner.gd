@@ -23,10 +23,8 @@ const CSV_COLUMNS := [
 ## default-argument expression); callers that omit it get Rng's own default.
 ##
 ## Arrivals are seated the same manual way interactive play seats them (see
-## ADR-0001/Sim.seat_party()) -- until a scripted autopilot is wired up to
-## call it (see .scratch/direct-manipulation-core-loop/issues/06-batch-runner-autopilot.md),
-## nothing here seats anyone, so a run simply characterizes every arrival
-## walking away on expired Patience.
+## ADR-0001/Sim.seat_party()), driven by the scripted autopilot rule in
+## _seat_pending_arrivals() every Morning.
 static func run(days: int, csv_path: String = DEFAULT_CSV_PATH, seed_value: int = -1) -> Array:
 	Rng.reset(seed_value) if seed_value >= 0 else Rng.reset()
 	Clock.reset()
@@ -34,16 +32,75 @@ static func run(days: int, csv_path: String = DEFAULT_CSV_PATH, seed_value: int 
 	Sim.reset()
 
 	var rows: Array = []
-	var handler := func(summary: Dictionary): rows.append(summary)
-	EventBus.day_summary.connect(handler)
+	var summary_handler := func(summary: Dictionary): rows.append(summary)
+	var morning_handler := func(_day: int, phase_name: String):
+		if phase_name == "MORNING":
+			_seat_pending_arrivals()
+	EventBus.day_summary.connect(summary_handler)
+	EventBus.phase_changed.connect(morning_handler)
 
 	for d in range(days):
 		Clock.force_advance_day()
 
-	EventBus.day_summary.disconnect(handler)
+	EventBus.day_summary.disconnect(summary_handler)
+	EventBus.phase_changed.disconnect(morning_handler)
 
 	_write_csv(csv_path, rows)
 	return rows
+
+
+## The scripted autopilot rule (see
+## .scratch/direct-manipulation-core-loop/issues/06-batch-runner-autopilot.md):
+## every Party still in Sim.pending_arrivals is matched, through Sim.seat_party()
+## -- the same single admission path interactive play uses -- to the smallest-
+## capacity green Room available, falling back to the smallest-capacity amber
+## Room, and left untouched in the queue if neither exists (its own Patience
+## then decides when it walks away). An oversized Party keeps matching against
+## whatever remains of it (see Sim.seat_party()'s split-across-rooms behavior)
+## until no Room fits.
+static func _seat_pending_arrivals() -> void:
+	var party_ids: Array = []
+	for party in Sim.pending_arrivals:
+		party_ids.append(int(party["id"]))
+
+	for party_id in party_ids:
+		var room := _best_room_for(party_id)
+		while not room.is_empty():
+			if not Sim.seat_party(party_id, room["room_type_id"], int(room["instance_id"])):
+				break
+			room = _best_room_for(party_id)
+
+
+## The autopilot rule's room choice for party_id right now: the smallest-
+## capacity green match, else the smallest-capacity amber match, else {} (no
+## Room worth tapping). Pure query, built on the same Sim.match_hint() the
+## interactive UI uses for its own green/amber highlighting.
+static func _best_room_for(party_id: int) -> Dictionary:
+	var best: Dictionary = {}
+	var best_hint := ""
+	var best_capacity := 0
+
+	for room in GameState.hotel_rooms:
+		var hint := Sim.match_hint(party_id, room["room_type_id"], int(room["instance_id"]))
+		if hint == "none":
+			continue
+		var capacity := int(GameState.effective_room_stats(room)["capacity"])
+		if _is_better_match(hint, capacity, best_hint, best_capacity):
+			best = room
+			best_hint = hint
+			best_capacity = capacity
+
+	return best
+
+
+## green always outranks amber regardless of capacity; within the same hint,
+## smaller capacity wins.
+static func _is_better_match(hint: String, capacity: int, best_hint: String, best_capacity: int) -> bool:
+	if best_hint.is_empty():
+		return true
+	if hint == best_hint:
+		return capacity < best_capacity
+	return hint == "green"
 
 
 static func _write_csv(path: String, rows: Array) -> void:

@@ -33,18 +33,16 @@ func _ready() -> void:
 
 
 func _run_batch_mode(args: PackedStringArray, days: int) -> void:
-	var policy := _string_arg(args, "--policy=", "")
 	var seed_value := _int_arg(args, "--seed=", -1)
 	var csv_path := _string_arg(args, "--csv=", BatchRunner.DEFAULT_CSV_PATH)
 
-	print("[Batch] Simulating %d days (policy=%s, seed=%s) -> %s" % [
+	print("[Batch] Simulating %d days (seed=%s) -> %s" % [
 		days,
-		policy if not policy.is_empty() else "default",
 		str(seed_value) if seed_value >= 0 else "default",
 		csv_path,
 	])
 
-	var rows := BatchRunner.run(days, csv_path, seed_value, policy)
+	var rows := BatchRunner.run(days, csv_path, seed_value)
 
 	if rows.is_empty():
 		print("[Batch] No days simulated.")
