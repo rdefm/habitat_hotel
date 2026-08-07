@@ -38,8 +38,8 @@ var _starting_hotel_template: Array = []
 var stations: Dictionary = {}
 
 # Mirrors the reference prototype's starting coverage: Biscuit on Reception,
-# Marlon on Bellhop, Shelly on Housekeeping, Kitchen empty until ticket 09
-# gives it something to gate.
+# Marlon on Bellhop, Shelly on Housekeeping, Kitchen unstaffed (the player
+# assigns someone to run breakfast/dinner service themselves).
 const DEFAULT_STATION_ASSIGNMENTS := {
 	"reception": ["biscuit"],
 	"bellhop": ["marlon"],

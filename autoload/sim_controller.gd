@@ -15,8 +15,10 @@ extends Node
 ## assign_staffer() -- GameState.stations holds the assignment, this file
 ## drives the effect of (un)staffing each one: Reception's Patience decay
 ## rate, Bellhop's check-in delay, and Housekeeping's per-Staffer cleaning
-## jobs (_tick_housekeeping()/_tick_checkins()). Kitchen assignment is
-## tracked but has no gated effect yet -- that lands with Dining in ticket 09.
+## jobs (_tick_housekeeping()/_tick_checkins()). Kitchen gates the Terrace's
+## breakfast service (ADR-0003, ticket 09): the Terrace itself is a fixed
+## structure present from Day 1, no build/unlock required, exactly like
+## Reception -- see _populate_breakfast_queue()/_tick_breakfast().
 
 const DemandGenerator = preload("res://sim/demand_generator.gd")
 const MatchHint = preload("res://sim/match_hint.gd")
@@ -61,6 +63,24 @@ var _has_forecast: bool = false
 # and stays true, so no partial credit for an abandoned job.
 var _cleaning_jobs: Dictionary = {}
 
+# Terrace breakfast queue (ADR-0003): {id, guest_id, room_type_id,
+# instance_id, species_id, party_size} for every currently-occupied Room's
+# guest, rebuilt from scratch each Morning by _populate_breakfast_queue() --
+# any entry left over from a prior Morning is dropped, not carried forward.
+# Public/queryable, same as pending_arrivals.
+var breakfast_queue: Array = []
+var _next_breakfast_entry_id: int = 1
+
+# Breakfast's in-flight jobs (ADR-0005), one per active Kitchen Staffer:
+# staffer_id -> {entry_id, ticks_remaining}. Mirrors _cleaning_jobs' shape --
+# every assigned Kitchen Staffer at/above the breakfast skill threshold
+# serves a different queued guest in parallel; a Staffer below the threshold
+# never claims a job at all. Reassigning a Staffer away drops their own
+# entry here (see assign_staffer()) without removing the queue entry itself
+# -- an interrupted guest just goes back to waiting, same as an interrupted
+# Housekeeping job leaves the Room dirty.
+var _breakfast_jobs: Dictionary = {}
+
 
 func _ready() -> void:
 	EventBus.phase_changed.connect(_on_phase_changed)
@@ -80,6 +100,9 @@ func reset() -> void:
 	_next_day_forecast.clear()
 	_has_forecast = false
 	_cleaning_jobs.clear()
+	breakfast_queue.clear()
+	_next_breakfast_entry_id = 1
+	_breakfast_jobs.clear()
 
 
 ## Read-only lookup of a pending_arrivals entry by party_id, for UI that
@@ -140,15 +163,17 @@ func seat_party(party_id: int, room_type_id: String, instance_id: int) -> bool:
 
 ## The single Staffer<->Station reassignment path (ADR-0005): moves
 ## staffer_id into station_id, dropping it from wherever it was assigned
-## before. If staffer_id had an in-flight Housekeeping job and is actually
-## moving to a different Station, that job is abandoned (see
-## _cleaning_jobs' doc comment) without touching any other Staffer's job.
-## Returns false with no effect for an unknown Staffer or Station id.
+## before. If staffer_id had an in-flight Housekeeping or breakfast job and
+## is actually moving to a different Station, that job is abandoned (see
+## _cleaning_jobs'/_breakfast_jobs' doc comments) without touching any other
+## Staffer's job. Returns false with no effect for an unknown Staffer or
+## Station id.
 func assign_staffer(staffer_id: String, station_id: String) -> bool:
 	if not GameState.staffers.has(staffer_id) or not Station.is_valid(station_id):
 		return false
 	if GameState.staffer_station(staffer_id) != station_id:
 		_cleaning_jobs.erase(staffer_id)
+		_breakfast_jobs.erase(staffer_id)
 	return GameState.reassign_staffer(staffer_id, station_id)
 
 
@@ -156,6 +181,20 @@ func assign_staffer(staffer_id: String, station_id: String) -> bool:
 ## Returns {} if that Staffer isn't currently cleaning anything.
 func cleaning_job(staffer_id: String) -> Dictionary:
 	return _cleaning_jobs.get(staffer_id, {})
+
+
+## Read-only lookup of a breakfast_queue entry by entry_id, for UI that needs
+## a single entry's fields without walking the array itself. Returns {} if
+## no such entry is currently queued.
+func breakfast_entry(entry_id: int) -> Dictionary:
+	var idx := _breakfast_index(entry_id)
+	return breakfast_queue[idx] if idx != -1 else {}
+
+
+## Read-only lookup of a Kitchen Staffer's in-flight breakfast job, for
+## UI/tests. Returns {} if that Staffer isn't currently serving anyone.
+func breakfast_job(staffer_id: String) -> Dictionary:
+	return _breakfast_jobs.get(staffer_id, {})
 
 
 func _on_phase_changed(day: int, phase_name: String) -> void:
@@ -172,6 +211,7 @@ func _on_phase_changed(day: int, phase_name: String) -> void:
 func _on_tick_advanced(_day: int, _tick_in_day: int) -> void:
 	_tick_housekeeping()
 	_tick_checkins()
+	_tick_breakfast()
 	if not _midday_active:
 		return
 	_decay_patience()
@@ -187,6 +227,8 @@ func _do_morning(day: int) -> void:
 	for gid in _ready_for_checkout:
 		_checkout_guest(gid)
 	_ready_for_checkout.clear()
+
+	_populate_breakfast_queue()
 
 	var arrivals: Array
 	if _has_forecast:
@@ -391,6 +433,88 @@ func _tick_checkins() -> void:
 		if room["checkin_ticks_remaining"] <= 0:
 			room["checking_in"] = false
 			room["checkin_ticks_remaining"] = 0
+
+
+## The Terrace's breakfast queue (ADR-0003): every currently-occupied Room's
+## guest joins fresh each Morning, replacing whatever was left over from the
+## day before -- an unserved guest doesn't carry into tomorrow's breakfast,
+## same as the reference prototype. No build/unlock gate: the Terrace is a
+## fixed structure present from Day 1, exactly like Reception.
+func _populate_breakfast_queue() -> void:
+	breakfast_queue.clear()
+	_breakfast_jobs.clear()
+	for room in GameState.hotel_rooms:
+		if room["occupant"] == null:
+			continue
+		var guest: Dictionary = guests[room["occupant"]]
+		breakfast_queue.append({
+			"id": _next_breakfast_entry_id,
+			"guest_id": guest["id"],
+			"room_type_id": room["room_type_id"],
+			"instance_id": int(room["instance_id"]),
+			"species_id": guest["species_id"],
+			"party_size": guest["party_size"],
+		})
+		_next_breakfast_entry_id += 1
+
+
+## Parallel per-Staffer breakfast service (ADR-0005/0003), mirroring
+## _tick_housekeeping()'s shape: every Kitchen Staffer not already mid-job
+## and at/above stations.kitchen.breakfast_min_skill claims the next
+## unclaimed queue entry and works it down over a Skill-dependent tick count
+## (stations.kitchen.breakfast_ticks_by_skill). A Staffer below the
+## threshold never claims a job at all, and an empty Kitchen Station simply
+## never drains the queue -- same "no bailout deadline" behavior as an
+## unstaffed Housekeeping Station leaving Rooms dirty indefinitely.
+func _tick_breakfast() -> void:
+	var min_skill: int = int(_station_balance("kitchen").get("breakfast_min_skill", 1))
+	var ticks_by_skill: Dictionary = _station_balance("kitchen").get("breakfast_ticks_by_skill", {})
+	var default_ticks: int = int(_station_balance("kitchen").get("default_breakfast_ticks", 20))
+
+	for staffer_id in GameState.station_staffers("kitchen"):
+		if _breakfast_jobs.has(staffer_id):
+			continue
+		var skill: int = int(GameState.staffers[staffer_id]["skills"]["kitchen"])
+		if skill < min_skill:
+			continue
+		var entry := _next_unclaimed_breakfast_entry()
+		if entry.is_empty():
+			continue
+		var ticks: int = int(ticks_by_skill.get(str(skill), default_ticks))
+		_breakfast_jobs[staffer_id] = {
+			"entry_id": int(entry["id"]),
+			"ticks_remaining": ticks,
+		}
+
+	for staffer_id in _breakfast_jobs.keys().duplicate():
+		var job: Dictionary = _breakfast_jobs[staffer_id]
+		job["ticks_remaining"] = int(job["ticks_remaining"]) - 1
+		if job["ticks_remaining"] > 0:
+			continue
+		var idx := _breakfast_index(int(job["entry_id"]))
+		if idx != -1:
+			breakfast_queue.remove_at(idx)
+		_breakfast_jobs.erase(staffer_id)
+
+
+## The first breakfast_queue entry (queue order) no in-flight breakfast job
+## is already targeting -- what a Kitchen Staffer who just freed up serves
+## next. Returns {} if there's nothing left to claim.
+func _next_unclaimed_breakfast_entry() -> Dictionary:
+	var claimed: Dictionary = {}
+	for job in _breakfast_jobs.values():
+		claimed[int(job["entry_id"])] = true
+	for entry in breakfast_queue:
+		if not claimed.has(int(entry["id"])):
+			return entry
+	return {}
+
+
+func _breakfast_index(entry_id: int) -> int:
+	for i in range(breakfast_queue.size()):
+		if int(breakfast_queue[i]["id"]) == entry_id:
+			return i
+	return -1
 
 
 func _do_night(day: int) -> void:

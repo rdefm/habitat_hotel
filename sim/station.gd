@@ -4,8 +4,8 @@ extends RefCounted
 ## The four live service posts (ADR-0005) a Staffer can be assigned to.
 ## Distinct from a fixed Role: any Staffer can work any Station, and a
 ## Station holds a list of assigned Staffer ids rather than a single slot.
-## Kitchen is tracked here like the other three but has no gated effect of
-## its own yet -- that's wired to Dining in ticket 09.
+## Kitchen gates the Terrace's breakfast service (ADR-0003, ticket 09) --
+## see Sim._tick_breakfast().
 
 const IDS := ["reception", "bellhop", "housekeeping", "kitchen"]
 

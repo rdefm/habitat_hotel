@@ -57,6 +57,11 @@
     "housekeeping": {
       "clean_ticks_by_skill": {"1": 40, "2": 32, "3": 26, "4": 20, "5": 16},
       "default_clean_ticks": 32
+    },
+    "kitchen": {
+      "breakfast_min_skill": 2,
+      "breakfast_ticks_by_skill": {"1": 24, "2": 20, "3": 16, "4": 14, "5": 12},
+      "default_breakfast_ticks": 20
     }
   }
 }
