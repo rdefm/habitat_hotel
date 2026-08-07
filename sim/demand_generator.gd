@@ -40,14 +40,31 @@ static func generate(game_state: Node, rng: Node) -> Array:
 			"budget": s["budget"],
 			"party_size": party_size,
 			"nights_total": nights,
-			"name": _pick_name(s["id"], names, rng),
+			"name": pick_name(s["id"], names, rng),
 		})
 	return arrivals
 
 
+## The Species for one Walk-in Diner (ticket 10, ADR-0003): if today's
+## Daily Special is set, walkin_special_bias_chance's chance of pulling
+## exactly that Species, otherwise (or the remaining chance) a uniform pick
+## across every known Species. Unlike Room-booking arrivals, Walk-in demand
+## isn't Star-gated -- the Terrace runs full demand from Day 1 regardless of
+## Star (ADR-0003), so there's no eligible-subset filter here.
+static func pick_walkin_species(species_registry: Dictionary, daily_special: String, dining_balance: Dictionary, rng: Node) -> Dictionary:
+	if species_registry.is_empty():
+		return {}
+	var bias_chance: float = float(dining_balance.get("walkin_special_bias_chance", 0.5))
+	if daily_special != "" and species_registry.has(daily_special) and rng.randf() < bias_chance:
+		return species_registry[daily_special]
+	var ids: Array = species_registry.keys()
+	var pick: String = ids[rng.randi_range(0, ids.size() - 1)]
+	return species_registry[pick]
+
+
 ## Equal chance of drawing from the general pool or this species' own pool;
 ## falls back to general if the species has no pool (or it's empty).
-static func _pick_name(species_id: String, names: Dictionary, rng: Node) -> String:
+static func pick_name(species_id: String, names: Dictionary, rng: Node) -> String:
 	var general: Array = names.get("general", [])
 	var species_pool: Array = names.get("species", {}).get(species_id, [])
 

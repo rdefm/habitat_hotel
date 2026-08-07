@@ -18,7 +18,13 @@ extends Node
 ## jobs (_tick_housekeeping()/_tick_checkins()). Kitchen gates the Terrace's
 ## breakfast service (ADR-0003, ticket 09): the Terrace itself is a fixed
 ## structure present from Day 1, no build/unlock required, exactly like
-## Reception -- see _populate_breakfast_queue()/_tick_breakfast().
+## Reception -- see _populate_breakfast_queue()/_tick_breakfast(). Kitchen
+## also gates the Terrace's Evening Walk-in Diner service (ticket 10), on a
+## higher Skill threshold than breakfast and with its own Patience-timered
+## queue independent of the Room-booking arrivals -- see
+## _populate_walkin_queue()/_tick_dinner()/_decay_walkin_patience(). A
+## Staffer can only work one Kitchen job at a time, so breakfast and dinner
+## claims share the busy-check _kitchen_busy().
 
 const DemandGenerator = preload("res://sim/demand_generator.gd")
 const MatchHint = preload("res://sim/match_hint.gd")
@@ -81,6 +87,30 @@ var _next_breakfast_entry_id: int = 1
 # Housekeeping job leaves the Room dirty.
 var _breakfast_jobs: Dictionary = {}
 
+# True only while Clock's current phase is EVENING -- the window during
+# which Walk-in Diners actually arrive and their Patience decays
+# tick-by-tick (see _on_tick_advanced()), mirroring _midday_active's role
+# for pending_arrivals.
+var _evening_active: bool = false
+
+# The Terrace's Evening Walk-in Diner queue (ticket 10): {id, name,
+# species_id, party_size, patience}, one entry per Walk-in Diner. Populated
+# fresh each Evening by _populate_walkin_queue() -- unlike breakfast_queue's
+# guest-per-occupied-Room source, the count and Species mix are drawn from
+# data/balance.json's dining.walkin_* tuning (Species pick biased toward
+# GameState.daily_special) -- see DemandGenerator.pick_walkin_species().
+# Public/queryable, same as pending_arrivals/breakfast_queue.
+var walkin_queue: Array = []
+var _next_walkin_id: int = 1
+
+# Dinner's in-flight jobs (ADR-0005), one per active Kitchen Staffer at/above
+# stations.kitchen.dinner_min_skill: staffer_id -> {entry_id,
+# ticks_remaining}. Mirrors _breakfast_jobs' shape exactly; kept as a
+# separate dict (rather than folded into _breakfast_jobs) so breakfast and
+# dinner service can be reasoned about independently even though a Staffer
+# can only ever be claimed by one of the two at a time (_kitchen_busy()).
+var _dinner_jobs: Dictionary = {}
+
 
 func _ready() -> void:
 	EventBus.phase_changed.connect(_on_phase_changed)
@@ -103,6 +133,10 @@ func reset() -> void:
 	breakfast_queue.clear()
 	_next_breakfast_entry_id = 1
 	_breakfast_jobs.clear()
+	_evening_active = false
+	walkin_queue.clear()
+	_next_walkin_id = 1
+	_dinner_jobs.clear()
 
 
 ## Read-only lookup of a pending_arrivals entry by party_id, for UI that
@@ -174,6 +208,7 @@ func assign_staffer(staffer_id: String, station_id: String) -> bool:
 	if GameState.staffer_station(staffer_id) != station_id:
 		_cleaning_jobs.erase(staffer_id)
 		_breakfast_jobs.erase(staffer_id)
+		_dinner_jobs.erase(staffer_id)
 	return GameState.reassign_staffer(staffer_id, station_id)
 
 
@@ -197,8 +232,23 @@ func breakfast_job(staffer_id: String) -> Dictionary:
 	return _breakfast_jobs.get(staffer_id, {})
 
 
+## Read-only lookup of a walkin_queue entry by entry_id, for UI that needs a
+## single entry's fields without walking the array itself. Returns {} if no
+## such entry is currently queued.
+func walkin_entry(entry_id: int) -> Dictionary:
+	var idx := _walkin_index(entry_id)
+	return walkin_queue[idx] if idx != -1 else {}
+
+
+## Read-only lookup of a Kitchen Staffer's in-flight dinner job, for
+## UI/tests. Returns {} if that Staffer isn't currently serving anyone.
+func dinner_job(staffer_id: String) -> Dictionary:
+	return _dinner_jobs.get(staffer_id, {})
+
+
 func _on_phase_changed(day: int, phase_name: String) -> void:
 	_midday_active = (phase_name == "MIDDAY")
+	_evening_active = (phase_name == "EVENING")
 	match phase_name:
 		"MORNING":
 			_do_morning(day)
@@ -212,6 +262,9 @@ func _on_tick_advanced(_day: int, _tick_in_day: int) -> void:
 	_tick_housekeeping()
 	_tick_checkins()
 	_tick_breakfast()
+	_tick_dinner()
+	if _evening_active:
+		_decay_walkin_patience()
 	if not _midday_active:
 		return
 	_decay_patience()
@@ -360,6 +413,8 @@ func _do_evening(_day: int) -> void:
 		_walk_away(party)
 	pending_arrivals.clear()
 
+	_populate_walkin_queue()
+
 
 ## Parallel per-Staffer cleaning (ADR-0005): every Housekeeping Staffer not
 ## already mid-job claims the next dirty, unclaimed Room and works it down
@@ -458,6 +513,16 @@ func _populate_breakfast_queue() -> void:
 		_next_breakfast_entry_id += 1
 
 
+## True while staffer_id is already mid-job on either Kitchen service --
+## breakfast or dinner -- so the other tick loop's claim pass skips them.
+## Skill alone doesn't decide which queue a dual-qualified Staffer (at/above
+## both breakfast_min_skill and dinner_min_skill) ends up serving; whichever
+## tick function runs first each frame (_tick_breakfast() before
+## _tick_dinner(), see _on_tick_advanced()) gets first claim.
+func _kitchen_busy(staffer_id: String) -> bool:
+	return _breakfast_jobs.has(staffer_id) or _dinner_jobs.has(staffer_id)
+
+
 ## Parallel per-Staffer breakfast service (ADR-0005/0003), mirroring
 ## _tick_housekeeping()'s shape: every Kitchen Staffer not already mid-job
 ## and at/above stations.kitchen.breakfast_min_skill claims the next
@@ -472,7 +537,7 @@ func _tick_breakfast() -> void:
 	var default_ticks: int = int(_station_balance("kitchen").get("default_breakfast_ticks", 20))
 
 	for staffer_id in GameState.station_staffers("kitchen"):
-		if _breakfast_jobs.has(staffer_id):
+		if _kitchen_busy(staffer_id):
 			continue
 		var skill: int = int(GameState.staffers[staffer_id]["skills"]["kitchen"])
 		if skill < min_skill:
@@ -517,7 +582,130 @@ func _breakfast_index(entry_id: int) -> int:
 	return -1
 
 
+## The Terrace's Evening Walk-in Diner queue (ticket 10, ADR-0003): a fresh
+## batch spawns the moment Evening starts (data/balance.json's
+## dining.walkin_count_min/max), each with its own Patience -- unlike
+## breakfast_queue's guest-per-occupied-Room source, these are new demand,
+## Species-picked via DemandGenerator.pick_walkin_species() (biased toward
+## GameState.daily_special, never Star-gated). Replaces whatever was left
+## over from a prior Evening (there shouldn't be any -- _do_night() force-
+## clears the queue when Evening ends).
+func _populate_walkin_queue() -> void:
+	walkin_queue.clear()
+	_dinner_jobs.clear()
+	var dining: Dictionary = GameState.balance.get("dining", {})
+	var count: int = Rng.randi_range(int(dining.get("walkin_count_min", 1)), int(dining.get("walkin_count_max", 1)))
+	var patience_start: float = float(dining.get("walkin_patience", {}).get("start", 0.0))
+
+	for i in range(count):
+		var species := DemandGenerator.pick_walkin_species(GameState.species, GameState.daily_special, dining, Rng)
+		if species.is_empty():
+			continue
+		walkin_queue.append({
+			"id": _next_walkin_id,
+			"name": DemandGenerator.pick_name(species["id"], GameState.names, Rng),
+			"species_id": species["id"],
+			"party_size": Rng.randi_range(int(species["party_size"][0]), int(species["party_size"][1])),
+			"patience": patience_start,
+		})
+		_next_walkin_id += 1
+
+
+## Parallel per-Staffer dinner service (ADR-0005/0003), mirroring
+## _tick_breakfast()'s shape but gated on the higher
+## stations.kitchen.dinner_min_skill: a Staffer who clears breakfast's bar
+## fine may still sit below dinner's and simply never claim a Walk-in Diner.
+## _kitchen_busy() keeps a Staffer already serving breakfast from also
+## claiming a dinner job (and vice versa) -- one job at a time per Staffer,
+## with breakfast's claim pass running first each tick (_on_tick_advanced()),
+## so a dual-qualified Staffer with a leftover breakfast entry still pending
+## finishes that before ever picking up a Walk-in Diner.
+func _tick_dinner() -> void:
+	var min_skill: int = int(_station_balance("kitchen").get("dinner_min_skill", 1))
+	var ticks_by_skill: Dictionary = _station_balance("kitchen").get("dinner_ticks_by_skill", {})
+	var default_ticks: int = int(_station_balance("kitchen").get("default_dinner_ticks", 20))
+
+	for staffer_id in GameState.station_staffers("kitchen"):
+		if _kitchen_busy(staffer_id):
+			continue
+		var skill: int = int(GameState.staffers[staffer_id]["skills"]["kitchen"])
+		if skill < min_skill:
+			continue
+		var entry := _next_unclaimed_walkin_entry()
+		if entry.is_empty():
+			continue
+		var ticks: int = int(ticks_by_skill.get(str(skill), default_ticks))
+		_dinner_jobs[staffer_id] = {
+			"entry_id": int(entry["id"]),
+			"ticks_remaining": ticks,
+		}
+
+	for staffer_id in _dinner_jobs.keys().duplicate():
+		var job: Dictionary = _dinner_jobs[staffer_id]
+		job["ticks_remaining"] = int(job["ticks_remaining"]) - 1
+		if job["ticks_remaining"] > 0:
+			continue
+		var idx := _walkin_index(int(job["entry_id"]))
+		if idx != -1:
+			walkin_queue.remove_at(idx)
+		_dinner_jobs.erase(staffer_id)
+
+
+## The first walkin_queue entry (queue order) no in-flight dinner job is
+## already targeting -- what a Kitchen Staffer who just freed up serves
+## next. Returns {} if there's nothing left to claim.
+func _next_unclaimed_walkin_entry() -> Dictionary:
+	var claimed: Dictionary = {}
+	for job in _dinner_jobs.values():
+		claimed[int(job["entry_id"])] = true
+	for entry in walkin_queue:
+		if not claimed.has(int(entry["id"])):
+			return entry
+	return {}
+
+
+func _walkin_index(entry_id: int) -> int:
+	for i in range(walkin_queue.size()):
+		if int(walkin_queue[i]["id"]) == entry_id:
+			return i
+	return -1
+
+
+## Walk-in Diners' own Patience timer (ticket 10), independent of
+## pending_arrivals' -- decays only while Evening is active (see
+## _on_tick_advanced()) and freezes for an entry currently being served,
+## mirroring _decay_patience()'s shape, including an unstaffed Kitchen
+## burning Patience faster (CONTEXT.md's Patience entry: "decays over
+## time -- faster if the relevant Station is unstaffed"), same as an
+## unstaffed Reception. An entry whose Patience hits zero walks away
+## immediately, same as an expired Room-booking Party.
+func _decay_walkin_patience() -> void:
+	var patience_cfg: Dictionary = GameState.balance.get("dining", {}).get("walkin_patience", {})
+	var decay: float = float(patience_cfg.get("decay_per_tick", 0.0))
+	if not GameState.is_station_staffed("kitchen"):
+		decay *= float(patience_cfg.get("unstaffed_multiplier", 1.0))
+	var being_served: Dictionary = {}
+	for job in _dinner_jobs.values():
+		being_served[int(job["entry_id"])] = true
+
+	for entry in walkin_queue:
+		if being_served.has(int(entry["id"])):
+			continue
+		entry["patience"] = maxf(0.0, float(entry["patience"]) - decay)
+
+	var expired: Array = walkin_queue.filter(func(e): return not being_served.has(int(e["id"])) and float(e["patience"]) <= 0.0)
+	for entry in expired:
+		walkin_queue.erase(entry)
+
+
 func _do_night(day: int) -> void:
+	# The Terrace's dinner service closes for the night along with Evening
+	# ending -- any Walk-in Diner still unserved (whether waiting or
+	# mid-job) leaves rather than carrying over, same "no bailout" framing
+	# as pending_arrivals' Evening-boundary force-expiry in _do_evening().
+	walkin_queue.clear()
+	_dinner_jobs.clear()
+
 	var upkeep := 0
 	for room in GameState.hotel_rooms:
 		upkeep += int(GameState.effective_room_stats(room)["upkeep_per_day"])

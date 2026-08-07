@@ -62,6 +62,13 @@ var hotel_amenities: Dictionary = {}
 # room_type_id -> current price multiplier applied to that type's base_rate.
 var price_multipliers: Dictionary = {}
 
+# Player-chosen Species id the Terrace's Evening Walk-in Diner demand is
+# biased toward (ticket 10, ADR-0003); "" means no Daily Special chosen.
+# Picking one is a UI concern (ticket 14) -- this is just where the choice
+# lives and set_daily_special() below is how it's validated/mutated. Resets
+# to "" on reset_to_starting_conditions().
+var daily_special: String = ""
+
 # Persistent record for the Reports/Reviews menus -- survives a menu being
 # closed and reopened. Cleared on reset_to_starting_conditions().
 var day_history: Array = []
@@ -112,6 +119,7 @@ func reset_to_starting_conditions() -> void:
 	_build_starting_hotel()
 	_reset_price_multipliers()
 	_reset_stations()
+	daily_special = ""
 	day_history.clear()
 	review_history.clear()
 	upcoming_arrivals.clear()
@@ -312,6 +320,17 @@ func set_price_multiplier(room_type_id: String, value: float) -> float:
 	var clamped := clampf(value, float(pricing.get("min_multiplier", 0.5)), float(pricing.get("max_multiplier", 2.0)))
 	price_multipliers[room_type_id] = clamped
 	return clamped
+
+
+## --- Dining queries, used by Sim's Walk-in Diner spawn (ticket 10) and the Terrace UI (ticket 14) ---
+
+## Sets today's Daily Special to species_id, or clears it if species_id is
+## "". Returns false (no effect) for an unknown species_id that isn't "".
+func set_daily_special(species_id: String) -> bool:
+	if species_id != "" and not species.has(species_id):
+		return false
+	daily_special = species_id
+	return true
 
 
 ## --- Roster/Station queries, used by Sim.assign_staffer() and the Roster menu ---
