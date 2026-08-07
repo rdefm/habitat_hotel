@@ -4,12 +4,12 @@
 
 **Blocked by:** 09, 10
 
-**Status:** done
+**Status:** done for Walk-in Diners; bullets 2/4 pend ticket 12 (see Comments)
 
 - [x] A served Walk-in Diner produces a Hearts and Reputation delta, computed through the shared Satisfaction module, not a separate scoring path
-- [x] A served room guest's dinner add-on produces the same class of Hearts/Reputation delta
+- [ ] A served room guest's dinner add-on produces the same class of Hearts/Reputation delta -- **not yet exercised**: ticket 12 (the add-on itself) doesn't exist in the codebase yet. The scoring path this ticket built is designed to cover it for free once it lands (see Comments) -- re-verify and check this box when ticket 12 actually routes an add-on entry through it.
 - [x] A Walk-in Diner who walks away from Patience expiry costs Reputation the same way a lost Room-booking Party walk-away does
-- [x] A room guest whose dinner add-on never gets served costs Reputation the same way a bad stay does
+- [ ] A room guest whose dinner add-on never gets served costs Reputation the same way a bad stay does -- **not yet exercised**, same caveat as above.
 - [x] Daily Special match and Kitchen service speed (by skill) both influence the computed score
 
 ## Comments
@@ -23,3 +23,7 @@ The room-guest dinner add-on itself (ticket 12) doesn't exist yet, so its two bo
 New tests: `tests/test_dining_reputation.gd` (extends `sim_test_base.gd`, following `test_walkin_dinner.gd`'s conventions) -- two pure-function tests on `Satisfaction.compute_dining()` (Daily Special match and Kitchen skill each independently raise the score), plus three integration tests through `Sim`: a served, Daily-Special-matching Walk-in Diner produces Hearts and a positive Reputation delta; a served, non-matching Walk-in Diner can land a neutral review with no Hearts and no Reputation change; and a Patience-expiry walk-away costs Reputation by exactly `reputation_delta_walkaway`.
 
 Verification note: as in ticket 09/10, this environment's vendored `Godot_v4.4-stable_win64_console.exe` has a pre-existing Godot-version gap running the GUT suite; see the session's verification output for however this run actually went.
+
+### Post-review addendum
+
+A `/code-review` pass flagged that checking bullets 2/4 off as "done" was premature since ticket 12's add-on doesn't exist yet to actually exercise them -- unchecked above until ticket 12 lands and is verified against this scoring path. The review also confirmed `compute_dining()`'s Kitchen-skill term is a proxy for "service speed" (the same skill number that drives `dinner_ticks_by_skill`), not a direct measurement of elapsed serve time -- a defensible reading of bullet 5 but worth knowing if that bullet is re-litigated later.
