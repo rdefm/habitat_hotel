@@ -37,6 +37,27 @@ static func compute(arrival: Dictionary, room_type: Dictionary, hotel_amenities:
 	return clampf(score, float(s["min"]), float(s["max"]))
 
 
+## A served dining guest's (Walk-in Diner or room guest's dinner add-on,
+## ticket 11/ADR-0003) Satisfaction-like score -- same shape of contract as
+## compute() above (clamped to the same satisfaction.min/max, fed through
+## the same review_for()/hearts_for()/reputation_delta_for_review() below),
+## but scored from dining-specific inputs instead of a Room match: whether
+## the guest's Species matches today's Daily Special, and the serving
+## Staffer's Kitchen skill (the same skill that already determines service
+## speed via stations.kitchen.*_ticks_by_skill -- faster service reads here
+## as a better meal).
+static func compute_dining(matches_daily_special: bool, kitchen_skill: int, balance: Dictionary) -> float:
+	var s: Dictionary = balance["satisfaction"]
+	var d: Dictionary = balance["dining"]["satisfaction"]
+
+	var score: float = float(d["base"])
+	if matches_daily_special:
+		score += float(d["special_match_bonus"])
+	score += float(kitchen_skill) * float(d["skill_bonus_per_level"])
+
+	return clampf(score, float(s["min"]), float(s["max"]))
+
+
 static func review_for(score: float, balance: Dictionary) -> String:
 	var r: Dictionary = balance["review"]
 	if score >= float(r["positive_threshold"]):

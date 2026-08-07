@@ -24,7 +24,12 @@ extends Node
 ## queue independent of the Room-booking arrivals -- see
 ## _populate_walkin_queue()/_tick_dinner()/_decay_walkin_patience(). A
 ## Staffer can only work one Kitchen job at a time, so breakfast and dinner
-## claims share the busy-check _kitchen_busy().
+## claims share the busy-check _kitchen_busy(). A served Walk-in Diner feeds
+## Hearts/Reputation the same way a good Checkout does (ticket 11,
+## ADR-0003) -- see _serve_walkin_diner(), called from _tick_dinner() just
+## before the served entry leaves walkin_queue; an unserved one walking away
+## from Patience expiry costs Reputation the same way a lost Room-booking
+## Party's walk-away does -- see _decay_walkin_patience().
 
 const DemandGenerator = preload("res://sim/demand_generator.gd")
 const MatchHint = preload("res://sim/match_hint.gd")
@@ -323,6 +328,11 @@ func _fresh_day_metrics() -> Dictionary:
 		"negative_reviews": 0,
 		"arrival_species": {},
 		"turned_away_species": {},
+		"dining_served": 0,
+		"dining_positive_reviews": 0,
+		"dining_neutral_reviews": 0,
+		"dining_negative_reviews": 0,
+		"dining_walked_away": 0,
 	}
 
 
@@ -647,6 +657,7 @@ func _tick_dinner() -> void:
 			continue
 		var idx := _walkin_index(int(job["entry_id"]))
 		if idx != -1:
+			_serve_walkin_diner(walkin_queue[idx], staffer_id)
 			walkin_queue.remove_at(idx)
 		_dinner_jobs.erase(staffer_id)
 
@@ -669,6 +680,35 @@ func _walkin_index(entry_id: int) -> int:
 		if int(walkin_queue[i]["id"]) == entry_id:
 			return i
 	return -1
+
+
+## A served Walk-in Diner's Reputation/Hearts outcome (ticket 11, ADR-0003):
+## scored through Satisfaction.compute_dining() -- Daily Special match plus
+## the serving Staffer's Kitchen skill -- then fed through the exact same
+## review_for()/hearts_for()/reputation_delta_for_review() a Checkout's
+## Satisfaction score goes through, so a good dining review moves Hearts/
+## Reputation exactly like a good stay does. Takes the queue entry (not just
+## its id) since the caller still holds it right before removing it from
+## walkin_queue.
+func _serve_walkin_diner(entry: Dictionary, staffer_id: String) -> void:
+	var skill: int = int(GameState.staffers[staffer_id]["skills"]["kitchen"])
+	var matches_special: bool = GameState.daily_special != "" and entry["species_id"] == GameState.daily_special
+	var sat := Satisfaction.compute_dining(matches_special, skill, GameState.balance)
+
+	GameState.hearts += Satisfaction.hearts_for(sat, GameState.balance)
+	var review := Satisfaction.review_for(sat, GameState.balance)
+	GameState.reputation = clampi(GameState.reputation + Satisfaction.reputation_delta_for_review(review, GameState.balance), 0, 100)
+
+	_day_metrics["dining_served"] += 1
+	match review:
+		"positive":
+			_day_metrics["dining_positive_reviews"] += 1
+		"negative":
+			_day_metrics["dining_negative_reviews"] += 1
+		_:
+			_day_metrics["dining_neutral_reviews"] += 1
+
+	EventBus.dining_guest_served.emit(entry["name"], entry["species_id"], review, sat)
 
 
 ## Walk-in Diners' own Patience timer (ticket 10), independent of
@@ -696,6 +736,13 @@ func _decay_walkin_patience() -> void:
 	var expired: Array = walkin_queue.filter(func(e): return not being_served.has(int(e["id"])) and float(e["patience"]) <= 0.0)
 	for entry in expired:
 		walkin_queue.erase(entry)
+		# Same service failure as a lost Room-booking Party's Patience-expiry
+		# walk-away (ticket 11, ADR-0003) -- an unserved Walk-in Diner is
+		# never a "fully booked"/"too expensive" turn-away, so it always
+		# stings Reputation, unconditionally.
+		GameState.reputation = clampi(GameState.reputation + int(GameState.balance["review"]["reputation_delta_walkaway"]), 0, 100)
+		_day_metrics["dining_walked_away"] += 1
+		EventBus.dining_guest_walked_away.emit(entry["name"], entry["species_id"])
 
 
 func _do_night(day: int) -> void:

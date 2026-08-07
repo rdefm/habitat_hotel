@@ -75,6 +75,11 @@
       "start": 48,
       "decay_per_tick": 1,
       "unstaffed_multiplier": 1.6
+    },
+    "satisfaction": {
+      "base": 50,
+      "special_match_bonus": 20,
+      "skill_bonus_per_level": 5
     }
   }
 }

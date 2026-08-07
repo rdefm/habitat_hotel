@@ -26,3 +26,11 @@ signal guest_turned_away(name: String, species_id: String, reason: String)
 signal guest_checked_out(name: String, species_id: String, room_type_id: String, instance_id: int)
 signal room_marked_dirty(room_type_id: String, instance_id: int)
 signal room_cleaned(room_type_id: String, instance_id: int)
+
+## A served dining guest's (Walk-in Diner today; a room guest's dinner
+## add-on once ticket 12 lands) Reputation/Hearts outcome (ticket 11,
+## ADR-0003) -- Sim's authoritative Hearts/Reputation mutation already
+## happened by the time this fires, same "not a source of truth" caveat as
+## the guest_* signals above.
+signal dining_guest_served(name: String, species_id: String, review: String, satisfaction: float)
+signal dining_guest_walked_away(name: String, species_id: String)
