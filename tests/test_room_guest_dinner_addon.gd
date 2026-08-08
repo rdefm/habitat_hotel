@@ -58,6 +58,24 @@ func test_seating_without_dinner_addon_leaves_the_room_card_unflagged() -> void:
 	assert_false(room["occupant_dinner_addon"])
 
 
+## --- Opting in sticks to the Party across a split-across-Rooms seating ---
+
+func test_dinner_addon_carries_across_a_split_partys_remaining_chunks() -> void:
+	# roost_loft#0 has capacity 4; a party_size-3 Party fits in one Room, so
+	# force a split by seating into cozy_nook#0 (capacity 2) first.
+	Sim.pending_arrivals.append(make_party(1, ["warm", "dry", "quiet"], 3))
+
+	Sim.seat_party(1, "cozy_nook", 0, true) # opt in explicitly on the first (capacity-2) chunk
+	assert_eq(int(Sim.pending_party(1)["party_size"]), 1, "2 of 3 should be seated, 1 left queued")
+	assert_true(Sim.pending_party(1)["dinner_addon"], "the still-queued remainder should reflect the sticky opt-in")
+
+	Sim.seat_party(1, "roost_loft", 0) # dinner_addon omitted here, simulating a reset checkbox
+	assert_true(Sim.pending_party(1).is_empty(), "the Party should be fully seated now")
+
+	assert_true(GameState.room_instance("cozy_nook", 0)["occupant_dinner_addon"])
+	assert_true(GameState.room_instance("roost_loft", 0)["occupant_dinner_addon"], "the second chunk should carry the add-on too, even without re-passing dinner_addon=true")
+
+
 ## --- Joining the Evening dinner queue ---
 
 func test_evening_queues_an_opted_in_room_guests_addon() -> void:

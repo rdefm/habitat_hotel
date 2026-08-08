@@ -181,9 +181,12 @@ func match_hint(party_id: int, room_type_id: String, instance_id: int) -> String
 ## on split-across-rooms.
 ##
 ## dinner_addon (ticket 12, ADR-0003): a Party can opt into a dinner add-on
-## as part of this seat action. The seated guest carries the opt-in until
-## the Evening dinner queue resolves it -- see
-## _populate_walkin_queue()/_resolve_room_guest_addon().
+## "for their stay" -- a Party-level choice, not a per-Room-chunk one -- so
+## passing true here sticks to the Party dict (party["dinner_addon"]) and
+## carries automatically to every later seat_party() call against the same
+## party_id, e.g. an oversized Party's remaining chunks after a split. Once
+## seated, the guest carries the opt-in until the Evening dinner queue
+## resolves it -- see _populate_walkin_queue()/_resolve_room_guest_addon().
 func seat_party(party_id: int, room_type_id: String, instance_id: int, dinner_addon: bool = false) -> bool:
 	var idx := _pending_index(party_id)
 	if idx == -1:
@@ -198,9 +201,12 @@ func seat_party(party_id: int, room_type_id: String, instance_id: int, dinner_ad
 		return false
 
 	var party: Dictionary = pending_arrivals[idx]
+	if dinner_addon:
+		party["dinner_addon"] = true
+	var wants_addon: bool = bool(party.get("dinner_addon", false))
 	var mismatch := hint == "amber"
 	var chunk_size: int = mini(int(room_stats["capacity"]), int(party["party_size"]))
-	_admit_guest(party, room_type_id, instance_id, mismatch, chunk_size, dinner_addon)
+	_admit_guest(party, room_type_id, instance_id, mismatch, chunk_size, wants_addon)
 
 	var metric_key := "matched_mismatched" if mismatch else "matched_strict"
 	_day_metrics[metric_key] += 1

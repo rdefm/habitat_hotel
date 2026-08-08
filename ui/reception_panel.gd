@@ -20,9 +20,12 @@ extends VBoxContainer
 ## dinner_addon_selected (ticket 12): while a Party is selected, a checkbox
 ## lets the player opt that Party into a dinner add-on before tapping a
 ## Room. main_screen reads this public field at the moment it calls
-## Sim.seat_party()/opens SeatConfirmMenu -- it resets to false whenever the
-## selection changes, so it never leaks from one Party's seating to the
-## next.
+## Sim.seat_party()/opens SeatConfirmMenu. Selecting a card seeds it from
+## Sim.pending_party()'s own dinner_addon field rather than defaulting to
+## false -- the opt-in is a Party-level choice that Sim.seat_party() already
+## sticks onto the Party dict across a split-across-Rooms seating (see its
+## doc comment), so re-selecting a partially-seated Party's remainder here
+## reflects that it's already opted in instead of silently forgetting it.
 
 const PatienceState = preload("res://sim/patience_state.gd")
 
@@ -120,7 +123,7 @@ func _make_dinner_addon_check() -> CheckBox:
 
 func _on_card_pressed(party_id: int) -> void:
 	_selected_party_id = -1 if _selected_party_id == party_id else party_id
-	dinner_addon_selected = false
+	dinner_addon_selected = false if _selected_party_id == -1 else bool(Sim.pending_party(_selected_party_id).get("dinner_addon", false))
 	party_selected.emit(_selected_party_id)
 	refresh()
 
