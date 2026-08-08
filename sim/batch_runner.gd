@@ -14,6 +14,8 @@ const CSV_COLUMNS := [
 	"occupancy_rate", "arrivals", "matched_strict", "matched_mismatched",
 	"walked_away_mismatch", "walked_away_full", "walked_away_too_expensive", "checkouts",
 	"positive_reviews", "neutral_reviews", "negative_reviews",
+	"dining_served", "dining_positive_reviews", "dining_neutral_reviews",
+	"dining_negative_reviews", "dining_walked_away",
 	"avg_satisfaction", "upkeep_cost", "wage_cost",
 ]
 
@@ -25,11 +27,23 @@ const CSV_COLUMNS := [
 ## Arrivals are seated the same manual way interactive play seats them (see
 ## ADR-0001/Sim.seat_party()), driven by the scripted autopilot rule in
 ## _seat_pending_arrivals() every Morning.
-static func run(days: int, csv_path: String = DEFAULT_CSV_PATH, seed_value: int = -1) -> Array:
+##
+## station_assignments is an optional staffer_id -> station_id override
+## applied once, right after the reset, through Sim.assign_staffer() -- the
+## same reassignment path the Roster UI uses (ticket 07/08), not a new one.
+## Defaults to {} (the reset's DEFAULT_STATION_ASSIGNMENTS is left as-is: only
+## Reception/Bellhop/Housekeeping covered, Kitchen empty), which is why an
+## existing caller that omits this argument sees no behavior change. A caller
+## that wants a batch run to actually exercise Dining -- e.g. the multi-day
+## integration check -- passes e.g. {"marlon": "kitchen"}.
+static func run(days: int, csv_path: String = DEFAULT_CSV_PATH, seed_value: int = -1, station_assignments: Dictionary = {}) -> Array:
 	Rng.reset(seed_value) if seed_value >= 0 else Rng.reset()
 	Clock.reset()
 	GameState.reset_to_starting_conditions()
 	Sim.reset()
+	for staffer_id in station_assignments:
+		if not Sim.assign_staffer(staffer_id, station_assignments[staffer_id]):
+			push_error("[BatchRunner] Unknown staffer_id/station_id in station_assignments override: %s -> %s" % [staffer_id, station_assignments[staffer_id]])
 
 	var rows: Array = []
 	var summary_handler := func(summary: Dictionary): rows.append(summary)
