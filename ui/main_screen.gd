@@ -206,9 +206,10 @@ func _on_seat_attempted(party_id: int, room_type_id: String, instance_id: int, h
 	menu.dinner_addon = dinner_addon
 	menu.resolved.connect(func(seated: bool):
 		_popup_host.close_popup()
-		_hotel_panel.refresh()
 		if seated:
 			_finish_seating_flow()
+		else:
+			_hotel_panel.refresh()
 	)
 	_popup_host.open_popup(menu)
 
