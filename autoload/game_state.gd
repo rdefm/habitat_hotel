@@ -157,6 +157,7 @@ func _new_room_instance(room_type_id: String, instance_id: int) -> Dictionary:
 		"occupant_name": null,
 		"occupant_species_id": null,
 		"occupant_mismatch": false,
+		"occupant_dinner_addon": false,
 		"upgrades": [],
 		"needs_cleaning": false,
 		"checking_in": false,

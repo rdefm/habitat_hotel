@@ -4,12 +4,12 @@
 
 **Blocked by:** 09, 10
 
-**Status:** done for Walk-in Diners; bullets 2/4 pend ticket 12 (see Comments)
+**Status:** done
 
 - [x] A served Walk-in Diner produces a Hearts and Reputation delta, computed through the shared Satisfaction module, not a separate scoring path
-- [ ] A served room guest's dinner add-on produces the same class of Hearts/Reputation delta -- **not yet exercised**: ticket 12 (the add-on itself) doesn't exist in the codebase yet. The scoring path this ticket built is designed to cover it for free once it lands (see Comments) -- re-verify and check this box when ticket 12 actually routes an add-on entry through it.
+- [x] A served room guest's dinner add-on produces the same class of Hearts/Reputation delta -- exercised now that ticket 12 lands: `Sim._serve_walkin_diner()` doesn't distinguish a room-guest-tagged entry from a true Walk-in Diner, so the Hearts/Reputation path applies identically. See `tests/test_room_guest_dinner_addon.gd`'s `test_served_addon_feeds_hearts_and_reputation_and_clears_the_room_card`.
 - [x] A Walk-in Diner who walks away from Patience expiry costs Reputation the same way a lost Room-booking Party walk-away does
-- [ ] A room guest whose dinner add-on never gets served costs Reputation the same way a bad stay does -- **not yet exercised**, same caveat as above.
+- [x] A room guest whose dinner add-on never gets served costs Reputation the same way a bad stay does -- exercised via `tests/test_room_guest_dinner_addon.gd`'s `test_unserved_addon_costs_reputation_and_clears_the_room_card`.
 - [x] Daily Special match and Kitchen service speed (by skill) both influence the computed score
 
 ## Comments
@@ -27,3 +27,7 @@ Verification note: as in ticket 09/10, this environment's vendored `Godot_v4.4-s
 ### Post-review addendum
 
 A `/code-review` pass flagged that checking bullets 2/4 off as "done" was premature since ticket 12's add-on doesn't exist yet to actually exercise them -- unchecked above until ticket 12 lands and is verified against this scoring path. The review also confirmed `compute_dining()`'s Kitchen-skill term is a proxy for "service speed" (the same skill number that drives `dinner_ticks_by_skill`), not a direct measurement of elapsed serve time -- a defensible reading of bullet 5 but worth knowing if that bullet is re-litigated later.
+
+### Ticket 12 addendum
+
+Ticket 12 (room-guest dinner add-on) landed and routes its queue entries through this exact scoring path with no dining-specific code of its own, confirming the "designed to cover it for free" prediction above -- bullets 2/4 checked off and re-verified per `tests/test_room_guest_dinner_addon.gd`.

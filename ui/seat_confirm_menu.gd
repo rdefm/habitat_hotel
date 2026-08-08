@@ -15,10 +15,15 @@ const MatchHint = preload("res://sim/match_hint.gd")
 ## Room for this Party" rather than losing the selection.
 signal resolved(seated: bool)
 
-## Set by the caller before this node enters the tree.
+## Set by the caller before this node enters the tree. dinner_addon carries
+## over whatever ReceptionPanel's opt-in checkbox was set to at the moment
+## the seat attempt was made (ticket 12) -- this menu doesn't re-expose its
+## own toggle, just honors the choice already made before the Room was
+## tapped.
 var party_id: int = -1
 var room_type_id: String = ""
 var instance_id: int = -1
+var dinner_addon: bool = false
 
 
 func _ready() -> void:
@@ -61,7 +66,7 @@ func _missing_needs(party: Dictionary) -> Array:
 
 
 func _on_confirm_pressed() -> void:
-	Sim.seat_party(party_id, room_type_id, instance_id)
+	Sim.seat_party(party_id, room_type_id, instance_id, dinner_addon)
 	resolved.emit(true)
 
 

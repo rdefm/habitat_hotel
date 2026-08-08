@@ -29,7 +29,13 @@ extends Node
 ## ADR-0003) -- see _serve_walkin_diner(), called from _tick_dinner() just
 ## before the served entry leaves walkin_queue; an unserved one walking away
 ## from Patience expiry costs Reputation the same way a lost Room-booking
-## Party's walk-away does -- see _decay_walkin_patience().
+## Party's walk-away does -- see _decay_walkin_patience(). A room guest can
+## opt into a dinner add-on as part of being seated (ticket 12) -- seat_party()
+## takes a dinner_addon flag, and every currently-opted-in guest folds into
+## the same Evening walkin_queue/Kitchen-skill gating/Reputation-Hearts path
+## as a true Walk-in Diner, tagged with a guest_id back-reference so its
+## outcome can clear the opt-in on both the guest record and the Room card --
+## see _queue_room_guest_addons()/_resolve_room_guest_addon().
 
 const DemandGenerator = preload("res://sim/demand_generator.gd")
 const MatchHint = preload("res://sim/match_hint.gd")
@@ -173,7 +179,12 @@ func match_hint(party_id: int, room_type_id: String, instance_id: int) -> String
 ## "none" or either id doesn't resolve. Any unseated remainder stays in
 ## pending_arrivals with its Patience unchanged -- see the class doc's note
 ## on split-across-rooms.
-func seat_party(party_id: int, room_type_id: String, instance_id: int) -> bool:
+##
+## dinner_addon (ticket 12, ADR-0003): a Party can opt into a dinner add-on
+## as part of this seat action. The seated guest carries the opt-in until
+## the Evening dinner queue resolves it -- see
+## _populate_walkin_queue()/_resolve_room_guest_addon().
+func seat_party(party_id: int, room_type_id: String, instance_id: int, dinner_addon: bool = false) -> bool:
 	var idx := _pending_index(party_id)
 	if idx == -1:
 		return false
@@ -189,7 +200,7 @@ func seat_party(party_id: int, room_type_id: String, instance_id: int) -> bool:
 	var party: Dictionary = pending_arrivals[idx]
 	var mismatch := hint == "amber"
 	var chunk_size: int = mini(int(room_stats["capacity"]), int(party["party_size"]))
-	_admit_guest(party, room_type_id, instance_id, mismatch, chunk_size)
+	_admit_guest(party, room_type_id, instance_id, mismatch, chunk_size, dinner_addon)
 
 	var metric_key := "matched_mismatched" if mismatch else "matched_strict"
 	_day_metrics[metric_key] += 1
@@ -599,7 +610,9 @@ func _breakfast_index(entry_id: int) -> int:
 ## Species-picked via DemandGenerator.pick_walkin_species() (biased toward
 ## GameState.daily_special, never Star-gated). Replaces whatever was left
 ## over from a prior Evening (there shouldn't be any -- _do_night() force-
-## clears the queue when Evening ends).
+## clears the queue when Evening ends). Also folds in every currently
+## opted-in room guest's dinner add-on (ticket 12) -- see
+## _queue_room_guest_addons().
 func _populate_walkin_queue() -> void:
 	walkin_queue.clear()
 	_dinner_jobs.clear()
@@ -617,6 +630,33 @@ func _populate_walkin_queue() -> void:
 			"species_id": species["id"],
 			"party_size": Rng.randi_range(int(species["party_size"][0]), int(species["party_size"][1])),
 			"patience": patience_start,
+			"guest_id": -1,
+		})
+		_next_walkin_id += 1
+
+	_queue_room_guest_addons(patience_start)
+
+
+## Folds every currently-staying guest with an active dinner add-on (ticket
+## 12, opted into at seat_party() time) into walkin_queue alongside this
+## Evening's true Walk-in Diners -- same entry shape plus a guest_id back-
+## reference so _resolve_room_guest_addon() can clear the opt-in once this
+## Evening serves or loses it. A multi-night guest's add-on is a one-time
+## choice made at check-in, not a nightly re-offer: once resolved (served or
+## walked away), dinner_addon flips false on both the guest record and the
+## Room card and this function no longer re-queues them on a later Evening.
+func _queue_room_guest_addons(patience_start: float) -> void:
+	for gid in guests.keys():
+		var guest: Dictionary = guests[gid]
+		if not guest.get("dinner_addon", false):
+			continue
+		walkin_queue.append({
+			"id": _next_walkin_id,
+			"name": guest["name"],
+			"species_id": guest["species_id"],
+			"party_size": int(guest["party_size"]),
+			"patience": patience_start,
+			"guest_id": gid,
 		})
 		_next_walkin_id += 1
 
@@ -708,7 +748,33 @@ func _serve_walkin_diner(entry: Dictionary, staffer_id: String) -> void:
 		_:
 			_day_metrics["dining_neutral_reviews"] += 1
 
+	_resolve_room_guest_addon(entry)
 	EventBus.dining_guest_served.emit(entry["name"], entry["species_id"], review, sat)
+
+
+## Clears a resolved room guest's dinner add-on opt-in (ticket 12) on both
+## the guest record and its Room card, whether this Evening served it
+## (_serve_walkin_diner()) or lost it to Patience expiry
+## (_decay_walkin_patience()) -- either way the one-time add-on is spent and
+## shouldn't be re-offered on a later Evening. A no-op for a true Walk-in
+## Diner entry (guest_id -1, or a guest who has since checked out).
+func _resolve_room_guest_addon(entry: Dictionary) -> void:
+	var gid: int = int(entry.get("guest_id", -1))
+	if gid == -1 or not guests.has(gid):
+		return
+	_set_dinner_addon(gid, false)
+
+
+## The single place that keeps a guest's dinner_addon opt-in (ticket 12) in
+## sync between its two mirrors -- the guest record (guests[gid]) and its
+## Room's card-facing copy (occupant_dinner_addon) -- so a future third
+## mutation site can't update one and forget the other.
+func _set_dinner_addon(gid: int, value: bool) -> void:
+	var guest: Dictionary = guests[gid]
+	guest["dinner_addon"] = value
+	var room := GameState.room_instance(guest["room_type_id"], guest["room_instance_id"])
+	if not room.is_empty():
+		room["occupant_dinner_addon"] = value
 
 
 ## Walk-in Diners' own Patience timer (ticket 10), independent of
@@ -742,6 +808,7 @@ func _decay_walkin_patience() -> void:
 		# stings Reputation, unconditionally.
 		GameState.reputation = clampi(GameState.reputation + int(GameState.balance["review"]["reputation_delta_walkaway"]), 0, 100)
 		_day_metrics["dining_walked_away"] += 1
+		_resolve_room_guest_addon(entry)
 		EventBus.dining_guest_walked_away.emit(entry["name"], entry["species_id"])
 
 
@@ -790,7 +857,7 @@ func _do_night(day: int) -> void:
 	EventBus.forecast_ready.emit(day + 1, _next_day_forecast.duplicate())
 
 
-func _admit_guest(party: Dictionary, room_type_id: String, instance_id: int, mismatch: bool, chunk_size: int) -> void:
+func _admit_guest(party: Dictionary, room_type_id: String, instance_id: int, mismatch: bool, chunk_size: int, dinner_addon: bool = false) -> void:
 	var room: Dictionary = GameState.room_instance(room_type_id, instance_id)
 	var room_stats := GameState.effective_room_stats(room)
 	var sat := Satisfaction.compute(party, room_stats, GameState.hotel_amenities, GameState.balance)
@@ -808,11 +875,13 @@ func _admit_guest(party: Dictionary, room_type_id: String, instance_id: int, mis
 		"room_instance_id": instance_id,
 		"satisfaction": sat,
 		"mismatch": mismatch,
+		"dinner_addon": false,
 	}
 	room["occupant"] = gid
 	room["occupant_name"] = party["name"]
 	room["occupant_species_id"] = party["species_id"]
 	room["occupant_mismatch"] = mismatch
+	_set_dinner_addon(gid, dinner_addon)
 	_start_checkin(room)
 	EventBus.guest_seated.emit(party["name"], party["species_id"], room_type_id, instance_id, mismatch)
 
@@ -862,6 +931,7 @@ func _checkout_guest(gid: int) -> void:
 	room["occupant_name"] = null
 	room["occupant_species_id"] = null
 	room["occupant_mismatch"] = false
+	room["occupant_dinner_addon"] = false
 	room["needs_cleaning"] = true
 	guests.erase(gid)
 	_day_metrics["checkouts"] += 1

@@ -16,6 +16,13 @@ extends VBoxContainer
 ## HotelPanel makes) since Patience needs to visibly tick down live: this
 ## panel refreshes on every EventBus.tick_advanced, not just on queue-
 ## membership-changing events.
+##
+## dinner_addon_selected (ticket 12): while a Party is selected, a checkbox
+## lets the player opt that Party into a dinner add-on before tapping a
+## Room. main_screen reads this public field at the moment it calls
+## Sim.seat_party()/opens SeatConfirmMenu -- it resets to false whenever the
+## selection changes, so it never leaks from one Party's seating to the
+## next.
 
 const PatienceState = preload("res://sim/patience_state.gd")
 
@@ -30,6 +37,7 @@ const TIER_COLOR := {
 }
 
 var _selected_party_id: int = -1
+var dinner_addon_selected: bool = false
 
 
 func _ready() -> void:
@@ -44,6 +52,7 @@ func _ready() -> void:
 ## Party's stale card selection can't linger.
 func clear_selection() -> void:
 	_selected_party_id = -1
+	dinner_addon_selected = false
 	refresh()
 
 
@@ -77,6 +86,9 @@ func refresh() -> void:
 	for party in Sim.pending_arrivals:
 		row.add_child(_make_card(party))
 
+	if _selected_party_id != -1:
+		add_child(_make_dinner_addon_check())
+
 
 func _make_card(party: Dictionary) -> Button:
 	var party_id := int(party["id"])
@@ -98,8 +110,17 @@ func _make_card(party: Dictionary) -> Button:
 	return btn
 
 
+func _make_dinner_addon_check() -> CheckBox:
+	var check := CheckBox.new()
+	check.text = "Add dinner service for this stay"
+	check.button_pressed = dinner_addon_selected
+	check.toggled.connect(func(value: bool): dinner_addon_selected = value)
+	return check
+
+
 func _on_card_pressed(party_id: int) -> void:
 	_selected_party_id = -1 if _selected_party_id == party_id else party_id
+	dinner_addon_selected = false
 	party_selected.emit(_selected_party_id)
 	refresh()
 

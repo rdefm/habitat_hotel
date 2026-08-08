@@ -117,10 +117,12 @@ func _make_cell(room_type_id: String, room_type: Dictionary, instance_id: int, r
 		var species_id: String = room.get("occupant_species_id", "")
 		var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
 		var mismatch: bool = room.get("occupant_mismatch", false)
+		var dinner_addon: bool = room.get("occupant_dinner_addon", false)
 		var fit_text := "mismatch" if mismatch else "perfect fit"
-		occupant_line = "\n%s\n%s (%s)" % [guest_name, species_name, fit_text]
+		var addon_text := " + Dinner" if dinner_addon else ""
+		occupant_line = "\n%s\n%s (%s)%s" % [guest_name, species_name, fit_text, addon_text]
 		modulate_color = Color(1.0, 0.85, 0.5) if mismatch else Color(0.75, 1.0, 0.75)
-		tooltip = "%s the %s -- %s" % [guest_name, species_name, fit_text]
+		tooltip = "%s the %s -- %s%s" % [guest_name, species_name, fit_text, " -- expecting dinner service tonight" if dinner_addon else ""]
 	elif dirty:
 		occupant_line = "\n(cleaning)"
 		modulate_color = Color(0.8, 0.75, 0.5)

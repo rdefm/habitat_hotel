@@ -185,8 +185,9 @@ func _on_party_selected(party_id: int) -> void:
 
 
 func _on_seat_attempted(party_id: int, room_type_id: String, instance_id: int, hint: String) -> void:
+	var dinner_addon := _reception_panel.dinner_addon_selected
 	if hint == "green":
-		Sim.seat_party(party_id, room_type_id, instance_id)
+		Sim.seat_party(party_id, room_type_id, instance_id, dinner_addon)
 		_finish_seating_flow()
 		return
 
@@ -194,6 +195,7 @@ func _on_seat_attempted(party_id: int, room_type_id: String, instance_id: int, h
 	menu.party_id = party_id
 	menu.room_type_id = room_type_id
 	menu.instance_id = instance_id
+	menu.dinner_addon = dinner_addon
 	menu.resolved.connect(func(seated: bool):
 		close_menu()
 		if seated:
