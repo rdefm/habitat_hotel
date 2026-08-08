@@ -11,7 +11,7 @@ const ReceptionPanel = preload("res://ui/reception_panel.gd")
 const PopupHost = preload("res://ui/popup_host.gd")
 const SeatConfirmMenu = preload("res://ui/seat_confirm_menu.gd")
 const StayInfoMenu = preload("res://ui/stay_info_menu.gd")
-const BuildMenu = preload("res://ui/build_menu.gd")
+const BuildConfirmMenu = preload("res://ui/build_confirm_menu.gd")
 const PricesMenu = preload("res://ui/prices_menu.gd")
 const HireMenu = preload("res://ui/hire_menu.gd")
 const RosterMenu = preload("res://ui/roster_menu.gd")
@@ -173,12 +173,15 @@ func _build_menu_bar() -> HBoxContainer:
 ## --- Hotel panel (the always-visible grid) ---
 
 func _on_hotel_slot_selected(room_type_id: String, instance_id: int) -> void:
-	var room_name: String = GameState.rooms[room_type_id]["name"]
 	if instance_id == -1:
-		var menu := BuildMenu.new()
-		menu.room_type_id = room_type_id
-		menu.build_completed.connect(close_menu)
-		open_menu("Build %s" % room_name, menu)
+		var confirm := BuildConfirmMenu.new()
+		confirm.room_type_id = room_type_id
+		confirm.resolved.connect(func(built: bool):
+			_popup_host.close_popup()
+			if built:
+				_hotel_panel.refresh()
+		)
+		_popup_host.open_popup(confirm)
 		return
 
 	var room := GameState.room_instance(room_type_id, instance_id)
