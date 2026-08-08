@@ -1,12 +1,14 @@
 extends Control
 
 ## Chunk 2 main screen: top bar, menu buttons, a decorative hotel panel, a
-## day log ticker, and a generic modal overlay. This is the Fun Gate's
-## actual playable surface -- everything here reads from/writes to
-## GameState via its public API, never touching Sim internals directly.
+## day log ticker, a generic modal overlay, and a bespoke small-popup host
+## (ADR-0011; see ui/popup_host.gd). This is the Fun Gate's actual playable
+## surface -- everything here reads from/writes to GameState via its public
+## API, never touching Sim internals directly.
 
 const HotelPanel = preload("res://ui/hotel_panel.gd")
 const ReceptionPanel = preload("res://ui/reception_panel.gd")
+const PopupHost = preload("res://ui/popup_host.gd")
 const SeatConfirmMenu = preload("res://ui/seat_confirm_menu.gd")
 const BuildMenu = preload("res://ui/build_menu.gd")
 const PricesMenu = preload("res://ui/prices_menu.gd")
@@ -37,6 +39,7 @@ var _overlay: Control
 var _overlay_title: Label
 var _overlay_body: VBoxContainer
 var _overlay_content: Control
+var _popup_host: PopupHost
 var _hotel_panel: HotelPanel
 var _reception_panel: ReceptionPanel
 
@@ -71,6 +74,9 @@ func _ready() -> void:
 	root.add_child(_build_day_log())
 
 	_build_overlay()
+
+	_popup_host = PopupHost.new()
+	add_child(_popup_host)
 
 	EventBus.day_summary.connect(_on_day_summary)
 	EventBus.review_posted.connect(_on_review_posted)
@@ -199,11 +205,12 @@ func _on_seat_attempted(party_id: int, room_type_id: String, instance_id: int, h
 	menu.instance_id = instance_id
 	menu.dinner_addon = dinner_addon
 	menu.resolved.connect(func(seated: bool):
-		close_menu()
+		_popup_host.close_popup()
+		_hotel_panel.refresh()
 		if seated:
 			_finish_seating_flow()
 	)
-	open_menu("Confirm seating", menu)
+	_popup_host.open_popup(menu)
 
 
 func _finish_seating_flow() -> void:

@@ -5,7 +5,8 @@ extends VBoxContainer
 ## seating immediately when the selected Party/Room pair is missing at
 ## least one Need. Names the missing Need(s) (MatchHint.missing_needs()) so
 ## the player knows exactly what they're trading away before committing.
-## Opened via main_screen's generic modal overlay, same as Build/Upgrade.
+## Opened via main_screen's bespoke PopupHost (ADR-0011), not the generic
+## full-panel overlay used by Build/Upgrade/Prices/etc.
 
 const MatchHint = preload("res://sim/match_hint.gd")
 
