@@ -10,6 +10,7 @@ const HotelPanel = preload("res://ui/hotel_panel.gd")
 const ReceptionPanel = preload("res://ui/reception_panel.gd")
 const PopupHost = preload("res://ui/popup_host.gd")
 const SeatConfirmMenu = preload("res://ui/seat_confirm_menu.gd")
+const StayInfoMenu = preload("res://ui/stay_info_menu.gd")
 const BuildMenu = preload("res://ui/build_menu.gd")
 const PricesMenu = preload("res://ui/prices_menu.gd")
 const HireMenu = preload("res://ui/hire_menu.gd")
@@ -178,11 +179,30 @@ func _on_hotel_slot_selected(room_type_id: String, instance_id: int) -> void:
 		menu.room_type_id = room_type_id
 		menu.build_completed.connect(close_menu)
 		open_menu("Build %s" % room_name, menu)
-	else:
-		var menu := UpgradeMenu.new()
-		menu.room_type_id = room_type_id
-		menu.instance_id = instance_id
-		open_menu("Upgrade %s #%d" % [room_name, instance_id], menu)
+		return
+
+	var room := GameState.room_instance(room_type_id, instance_id)
+	if room["occupant"] != null:
+		var info := StayInfoMenu.new()
+		info.room_type_id = room_type_id
+		info.instance_id = instance_id
+		info.resolved.connect(func(open_upgrade: bool):
+			_popup_host.close_popup()
+			if open_upgrade:
+				_open_upgrade_menu(room_type_id, instance_id)
+		)
+		_popup_host.open_popup(info)
+		return
+
+	_open_upgrade_menu(room_type_id, instance_id)
+
+
+func _open_upgrade_menu(room_type_id: String, instance_id: int) -> void:
+	var room_name: String = GameState.rooms[room_type_id]["name"]
+	var menu := UpgradeMenu.new()
+	menu.room_type_id = room_type_id
+	menu.instance_id = instance_id
+	open_menu("Upgrade %s #%d" % [room_name, instance_id], menu)
 
 
 ## --- Reception (tap a Party, then tap a Room to seat -- ADR-0001, ticket 05) ---
