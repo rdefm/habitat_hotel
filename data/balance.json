@@ -74,6 +74,8 @@
     "walkin_patience": {
       "start": 48,
       "decay_per_tick": 1,
+      "impatient_at": 24,
+      "huffy_at": 9,
       "unstaffed_multiplier": 1.6
     },
     "satisfaction": {

@@ -97,7 +97,7 @@ func _make_card(party: Dictionary) -> Button:
 	var party_id := int(party["id"])
 	var species_id: String = party["species_id"]
 	var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
-	var tier := PatienceState.tier(float(party["patience"]), GameState.balance)
+	var tier := PatienceState.tier(float(party["patience"]), GameState.balance["patience"])
 	var selected := party_id == _selected_party_id
 
 	var btn := Button.new()

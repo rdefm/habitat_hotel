@@ -15,6 +15,7 @@ const RosterMenu = preload("res://ui/roster_menu.gd")
 const ReportsMenu = preload("res://ui/reports_menu.gd")
 const ReviewsMenu = preload("res://ui/reviews_menu.gd")
 const UpgradeMenu = preload("res://ui/upgrade_menu.gd")
+const TerraceMenu = preload("res://ui/terrace_menu.gd")
 const LobbyView = preload("res://ui/lobby_view.gd")
 const DemandFormat = preload("res://ui/demand_format.gd")
 
@@ -147,6 +148,7 @@ func _build_menu_bar() -> HBoxContainer:
 		["Prices", func(): return PricesMenu.new()],
 		["Hire", func(): return HireMenu.new()],
 		["Roster", func(): return RosterMenu.new()],
+		["Terrace", func(): return TerraceMenu.new()],
 		["Reports", func(): return ReportsMenu.new()],
 		["Reviews", func(): return ReviewsMenu.new()],
 	]
