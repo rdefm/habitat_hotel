@@ -34,6 +34,7 @@ static func load_all() -> Dictionary:
 	var starting_hotel := load_starting_hotel(rooms)
 	var names := load_names(species)
 	var staffers := load_staffers()
+	var terrace := load_terrace()
 	return {
 		"tags": tags,
 		"species": species,
@@ -44,6 +45,7 @@ static func load_all() -> Dictionary:
 		"starting_hotel": starting_hotel,
 		"names": names,
 		"staffers": staffers,
+		"terrace": terrace,
 	}
 
 
@@ -168,6 +170,48 @@ static func _validate_room_upgrade(room_id: String, upgrade: Variant, valid_tags
 			break
 	if not has_effect:
 		push_error("[DataLoader] room '%s' upgrade '%s' has no effect fields (%s)" % [room_id, upgrade["id"], ROOM_UPGRADE_EFFECT_FIELDS])
+		return false
+	return true
+
+
+const TERRACE_UPGRADE_EFFECT_FIELDS := ["satisfaction_bonus", "capacity_delta", "upkeep_delta"]
+
+
+## The Terrace (ADR-0003): a fixed structure, not a room type, so no tags/
+## capacity/build_cost fields -- just an upkeep_per_day base and an upgrades
+## list in the same per-instance-modifier shape as a Room's (id/name/
+## description/costs required, at least one of TERRACE_UPGRADE_EFFECT_FIELDS
+## present). No adds_tag effect: the Terrace has no tags for an upgrade to add.
+static func load_terrace() -> Dictionary:
+	var out := {"upkeep_per_day": 0, "upgrades": []}
+	var raw: Variant = _read_json("terrace.json")
+	if raw == null:
+		return out
+	if not (raw is Dictionary):
+		push_error("[DataLoader] terrace.json must be a JSON object")
+		return out
+	out["upkeep_per_day"] = int(raw.get("upkeep_per_day", 0))
+	for upgrade in raw.get("upgrades", []):
+		if _validate_terrace_upgrade(upgrade):
+			out["upgrades"].append(upgrade)
+	return out
+
+
+static func _validate_terrace_upgrade(upgrade: Variant) -> bool:
+	if not (upgrade is Dictionary):
+		push_error("[DataLoader] terrace.json has a non-object upgrade entry")
+		return false
+	for field in ["id", "name", "description", "cost_hearts", "cost_cash"]:
+		if not upgrade.has(field):
+			push_error("[DataLoader] terrace upgrade missing '%s': %s" % [field, JSON.stringify(upgrade)])
+			return false
+	var has_effect := false
+	for field in TERRACE_UPGRADE_EFFECT_FIELDS:
+		if upgrade.has(field):
+			has_effect = true
+			break
+	if not has_effect:
+		push_error("[DataLoader] terrace upgrade '%s' has no effect fields (%s)" % [upgrade["id"], TERRACE_UPGRADE_EFFECT_FIELDS])
 		return false
 	return true
 

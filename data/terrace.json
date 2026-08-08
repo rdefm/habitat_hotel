@@ -1,0 +1,29 @@
+{
+  "upkeep_per_day": 10,
+  "upgrades": [
+    {
+      "id": "seasoned_recipes",
+      "name": "Seasoned Recipes",
+      "description": "A sharper menu noticeably improves every dining guest's meal.",
+      "satisfaction_bonus": 10,
+      "cost_cash": 600,
+      "cost_hearts": 8
+    },
+    {
+      "id": "extra_seating",
+      "name": "Extra Seating",
+      "description": "More tables let the Terrace serve a bigger dinner crowd each evening.",
+      "capacity_delta": 1,
+      "cost_cash": 700,
+      "cost_hearts": 6
+    },
+    {
+      "id": "outdoor_awning",
+      "name": "Outdoor Awning",
+      "description": "Keeps the weather off the equipment, cutting daily upkeep.",
+      "upkeep_delta": -4,
+      "cost_cash": 500,
+      "cost_hearts": 5
+    }
+  ]
+}

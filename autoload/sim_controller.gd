@@ -35,7 +35,13 @@ extends Node
 ## the same Evening walkin_queue/Kitchen-skill gating/Reputation-Hearts path
 ## as a true Walk-in Diner, tagged with a guest_id back-reference so its
 ## outcome can clear the opt-in on both the guest record and the Room card --
-## see _queue_room_guest_addons()/_resolve_room_guest_addon().
+## see _queue_room_guest_addons()/_resolve_room_guest_addon(). A purchased
+## Terrace upgrade (ticket 13, ADR-0003, GameState.effective_terrace_stats())
+## feeds three Dining outcomes the same way a Room upgrade feeds a stay: its
+## satisfaction_bonus adds directly into _serve_walkin_diner()'s
+## Satisfaction.compute_dining() score, its capacity_delta widens the Walk-in
+## count range _populate_walkin_queue() draws from, and its upkeep_delta
+## folds into _do_night()'s nightly upkeep alongside every Room's.
 
 const DemandGenerator = preload("res://sim/demand_generator.gd")
 const MatchHint = preload("res://sim/match_hint.gd")
@@ -623,7 +629,13 @@ func _populate_walkin_queue() -> void:
 	walkin_queue.clear()
 	_dinner_jobs.clear()
 	var dining: Dictionary = GameState.balance.get("dining", {})
-	var count: int = Rng.randi_range(int(dining.get("walkin_count_min", 1)), int(dining.get("walkin_count_max", 1)))
+	# A purchased Terrace capacity upgrade (ticket 13, ADR-0003) widens both
+	# ends of the Walk-in count range -- more tables means more Diners can
+	# show up on any given Evening, not a guaranteed extra Diner every night.
+	var capacity_delta: int = int(GameState.effective_terrace_stats()["capacity_delta"])
+	var count_min: int = maxi(0, int(dining.get("walkin_count_min", 1)) + capacity_delta)
+	var count_max: int = maxi(count_min, int(dining.get("walkin_count_max", 1)) + capacity_delta)
+	var count: int = Rng.randi_range(count_min, count_max)
 	var patience_start: float = float(dining.get("walkin_patience", {}).get("start", 0.0))
 
 	for i in range(count):
@@ -739,7 +751,8 @@ func _walkin_index(entry_id: int) -> int:
 func _serve_walkin_diner(entry: Dictionary, staffer_id: String) -> void:
 	var skill: int = int(GameState.staffers[staffer_id]["skills"]["kitchen"])
 	var matches_special: bool = GameState.daily_special != "" and entry["species_id"] == GameState.daily_special
-	var sat := Satisfaction.compute_dining(matches_special, skill, GameState.balance)
+	var terrace_bonus: float = float(GameState.effective_terrace_stats()["satisfaction_bonus"])
+	var sat := Satisfaction.compute_dining(matches_special, skill, GameState.balance, terrace_bonus)
 
 	GameState.hearts += Satisfaction.hearts_for(sat, GameState.balance)
 	var review := Satisfaction.review_for(sat, GameState.balance)
@@ -829,6 +842,7 @@ func _do_night(day: int) -> void:
 	var upkeep := 0
 	for room in GameState.hotel_rooms:
 		upkeep += int(GameState.effective_room_stats(room)["upkeep_per_day"])
+	upkeep += int(GameState.effective_terrace_stats()["upkeep_per_day"])
 	var wage := int(GameState.balance["costs"]["staff_wage_per_day"])
 	GameState.cash -= (upkeep + wage)
 	_day_metrics["upkeep_cost"] = upkeep

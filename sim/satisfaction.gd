@@ -45,8 +45,12 @@ static func compute(arrival: Dictionary, room_type: Dictionary, hotel_amenities:
 ## the guest's Species matches today's Daily Special, and the serving
 ## Staffer's Kitchen skill (the same skill that already determines service
 ## speed via stations.kitchen.*_ticks_by_skill -- faster service reads here
-## as a better meal).
-static func compute_dining(matches_daily_special: bool, kitchen_skill: int, balance: Dictionary) -> float:
+## as a better meal). terrace_satisfaction_bonus (ticket 13, ADR-0003) is the
+## sum of every purchased Terrace upgrade's satisfaction_bonus
+## (GameState.effective_terrace_stats()) -- the dining equivalent of
+## compute()'s room_type.get("satisfaction_bonus", 0) term, defaulted to 0 so
+## every existing caller is unaffected.
+static func compute_dining(matches_daily_special: bool, kitchen_skill: int, balance: Dictionary, terrace_satisfaction_bonus: float = 0.0) -> float:
 	var s: Dictionary = balance["satisfaction"]
 	var d: Dictionary = balance["dining"]["satisfaction"]
 
@@ -54,6 +58,7 @@ static func compute_dining(matches_daily_special: bool, kitchen_skill: int, bala
 	if matches_daily_special:
 		score += float(d["special_match_bonus"])
 	score += float(kitchen_skill) * float(d["skill_bonus_per_level"])
+	score += terrace_satisfaction_bonus
 
 	return clampf(score, float(s["min"]), float(s["max"]))
 

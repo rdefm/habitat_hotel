@@ -30,6 +30,7 @@ var seasons: Dictionary = {}
 var balance: Dictionary = {}
 var names: Dictionary = {}
 var staffers: Dictionary = {}
+var terrace: Dictionary = {}
 var _starting_hotel_template: Array = []
 
 # Mutable Roster/Station assignment: Station.IDS' id -> Array of assigned
@@ -61,6 +62,13 @@ var hotel_amenities: Dictionary = {}
 
 # room_type_id -> current price multiplier applied to that type's base_rate.
 var price_multipliers: Dictionary = {}
+
+# Purchased Terrace upgrade ids (ticket 13, ADR-0003) -- same shape-of-
+# contract as a Room instance's "upgrades" Array, but the Terrace is a single
+# fixed structure (not per-instance), so this lives directly on GameState
+# rather than nested in a hotel_rooms entry. Reset to [] alongside the rest
+# of session state.
+var terrace_upgrades: Array = []
 
 # Player-chosen Species id the Terrace's Evening Walk-in Diner demand is
 # biased toward (ticket 10, ADR-0003); "" means no Daily Special chosen.
@@ -101,6 +109,7 @@ func _load_data() -> void:
 	_starting_hotel_template = data["starting_hotel"]
 	names = data["names"]
 	staffers = data["staffers"]
+	terrace = data["terrace"]
 	EventBus.data_loaded.emit()
 
 
@@ -119,6 +128,7 @@ func reset_to_starting_conditions() -> void:
 	_build_starting_hotel()
 	_reset_price_multipliers()
 	_reset_stations()
+	terrace_upgrades.clear()
 	daily_special = ""
 	day_history.clear()
 	review_history.clear()
@@ -305,6 +315,71 @@ func purchase_upgrade(room_type_id: String, instance_id: int, upgrade_id: String
 	cash -= cost_cash
 	hearts -= cost_hearts
 	room["upgrades"].append(upgrade_id)
+	return true
+
+
+## --- Terrace upgrade queries, used by Sim's Dining outcomes (ticket 13) and the Terrace UI (ticket 14) ---
+
+## The Terrace's base upkeep merged with the effects of every upgrade
+## purchased so far -- same merge shape as effective_room_stats(), minus
+## adds_tag (the Terrace has no tags). What Sim's dining outcomes (walk-in
+## queue capacity, dining Satisfaction score, nightly upkeep) should always
+## read instead of GameState.terrace directly.
+func effective_terrace_stats() -> Dictionary:
+	var stats: Dictionary = {
+		"upkeep_per_day": int(terrace.get("upkeep_per_day", 0)),
+		"capacity_delta": 0,
+		"satisfaction_bonus": 0.0,
+	}
+
+	for upgrade_id in terrace_upgrades:
+		var upgrade := _find_terrace_upgrade(upgrade_id)
+		if upgrade.is_empty():
+			continue
+		if upgrade.has("upkeep_delta"):
+			stats["upkeep_per_day"] = maxi(0, int(stats["upkeep_per_day"]) + int(upgrade["upkeep_delta"]))
+		if upgrade.has("capacity_delta"):
+			stats["capacity_delta"] = int(stats["capacity_delta"]) + int(upgrade["capacity_delta"])
+		if upgrade.has("satisfaction_bonus"):
+			stats["satisfaction_bonus"] = float(stats["satisfaction_bonus"]) + float(upgrade["satisfaction_bonus"])
+
+	return stats
+
+
+## Terrace upgrades in the catalog that haven't been purchased yet.
+func available_terrace_upgrades() -> Array:
+	var out: Array = []
+	for upgrade in terrace.get("upgrades", []):
+		if not terrace_upgrades.has(upgrade["id"]):
+			out.append(upgrade)
+	return out
+
+
+func _find_terrace_upgrade(upgrade_id: String) -> Dictionary:
+	for upgrade in terrace.get("upgrades", []):
+		if upgrade["id"] == upgrade_id:
+			return upgrade
+	return {}
+
+
+## Attempts to buy upgrade_id for the Terrace. Returns true on success; false
+## (no side effects) if the upgrade doesn't exist/is already purchased, or
+## cash+Hearts are insufficient. Mirrors purchase_upgrade()'s contract minus
+## the room_type_id/instance_id addressing -- the Terrace is a single fixed
+## structure, not per-instance.
+func purchase_terrace_upgrade(upgrade_id: String) -> bool:
+	var upgrade := _find_terrace_upgrade(upgrade_id)
+	if upgrade.is_empty():
+		return false
+	if terrace_upgrades.has(upgrade_id):
+		return false
+	var cost_cash := int(upgrade["cost_cash"])
+	var cost_hearts := int(upgrade["cost_hearts"])
+	if cash < cost_cash or hearts < cost_hearts:
+		return false
+	cash -= cost_cash
+	hearts -= cost_hearts
+	terrace_upgrades.append(upgrade_id)
 	return true
 
 
