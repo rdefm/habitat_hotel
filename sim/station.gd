@@ -9,6 +9,13 @@ extends RefCounted
 
 const IDS := ["reception", "bellhop", "housekeeping", "kitchen"]
 
+const LABELS := {
+	"reception": "Reception",
+	"bellhop": "Bellhop",
+	"housekeeping": "Housekeeping",
+	"kitchen": "Kitchen",
+}
+
 
 static func is_valid(station_id: String) -> bool:
 	return IDS.has(station_id)

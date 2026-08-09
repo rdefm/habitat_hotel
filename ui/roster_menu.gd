@@ -1,41 +1,38 @@
 class_name RosterMenu
 extends VBoxContainer
 
-## Roster & Station assignment (ticket 08, ADR-0001/0005): tap a Staffer
-## card then tap a Station card to (re)assign them there, mirroring
+## Kitchen Station assignment (ticket 04/08, ADR-0001/0005/0009): tap a
+## Staffer card then tap the Kitchen card to (re)assign them there, mirroring
 ## Reception's tap-Party/tap-Room flow (reception_panel.gd/hotel_panel.gd).
+## Reception/Bellhop/Housekeeping Station slots moved out to
+## ui/station_panel.gd, always visible near Reception (ticket 04); Kitchen
+## stays here until ticket 05 moves it onto the Terrace, at which point this
+## menu is retired entirely (ticket 06).
 ## Sim.assign_staffer() already treats "tap the Station they're already at"
 ## and unknown ids as harmless no-ops, and already interrupts only the
-## moved Staffer's own in-flight job (ticket 07) -- this view just re-tap
-## re-renders both sides after every assignment.
+## moved Staffer's own in-flight job (ticket 07) -- this view just re-taps
+## re-renders both sides after every assignment. Shares its Staffer/Station
+## card rendering with ui/station_panel.gd via ui/staffer_card.gd and
+## ui/station_card.gd.
 ##
-## Station cards are disabled while no Staffer is selected: unlike a Room
+## Kitchen's card is disabled while no Staffer is selected: unlike a Room
 ## cell, a Station has no other action to fall back to.
 
-const Station = preload("res://sim/station.gd")
-
-const CARD_MIN_SIZE := Vector2(120, 100)
-
-const STATION_LABELS := {
-	"reception": "Reception",
-	"bellhop": "Bellhop",
-	"housekeeping": "Housekeeping",
-	"kitchen": "Kitchen",
-}
+const StafferCard = preload("res://ui/staffer_card.gd")
+const StationCard = preload("res://ui/station_card.gd")
 
 var _selected_staffer_id: String = ""
 
 var _staffer_row: HBoxContainer
 var _station_row: HBoxContainer
-var _wage_label: Label
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(560, 320)
+	custom_minimum_size = Vector2(560, 220)
 	add_theme_constant_override("separation", 10)
 
 	var staffer_header := Label.new()
-	staffer_header.text = "Staffers -- tap one, then tap a Station to assign"
+	staffer_header.text = "Staffers -- tap one, then tap Kitchen to assign"
 	add_child(staffer_header)
 
 	_staffer_row = HBoxContainer.new()
@@ -50,12 +47,6 @@ func _ready() -> void:
 	_station_row.add_theme_constant_override("separation", 8)
 	add_child(_station_row)
 
-	_wage_label = Label.new()
-	_wage_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-	var wage := int(GameState.balance.get("costs", {}).get("staff_wage_per_day", 0))
-	_wage_label.text = "Your crew costs a flat %d cash/day, deducted every Night phase regardless of Station." % wage
-	add_child(_wage_label)
-
 	refresh()
 
 
@@ -68,51 +59,9 @@ func refresh() -> void:
 	var staffer_ids := GameState.staffers.keys()
 	staffer_ids.sort()
 	for staffer_id in staffer_ids:
-		_staffer_row.add_child(_make_staffer_card(staffer_id))
+		_staffer_row.add_child(StafferCard.make_button(staffer_id, staffer_id == _selected_staffer_id, _on_staffer_pressed))
 
-	for station_id in Station.IDS:
-		_station_row.add_child(_make_station_card(station_id))
-
-
-func _make_staffer_card(staffer_id: String) -> Button:
-	var staffer: Dictionary = GameState.staffers[staffer_id]
-	var skills: Dictionary = staffer["skills"]
-	var current_station := GameState.staffer_station(staffer_id)
-	var current_label: String = STATION_LABELS.get(current_station, "(unassigned)")
-	var selected := staffer_id == _selected_staffer_id
-	var skill_summary := _skill_summary(skills)
-
-	var btn := Button.new()
-	btn.custom_minimum_size = CARD_MIN_SIZE
-	btn.clip_text = true
-	btn.text = "%s%s\n%s\n%s" % ["» " if selected else "", staffer["name"], skill_summary, current_label]
-	btn.modulate = Color(1.0, 1.0, 0.6) if selected else Color(1, 1, 1)
-	btn.tooltip_text = "%s -- %s -- currently %s" % [staffer["name"], skill_summary, current_label]
-	btn.pressed.connect(_on_staffer_pressed.bind(staffer_id))
-	return btn
-
-
-## "R# B# H# K#" -- shared by the card face and its tooltip.
-func _skill_summary(skills: Dictionary) -> String:
-	return "R%d B%d H%d K%d" % [
-		int(skills["reception"]), int(skills["bellhop"]), int(skills["housekeeping"]), int(skills["kitchen"]),
-	]
-
-
-func _make_station_card(station_id: String) -> Button:
-	var staffer_ids: Array = GameState.station_staffers(station_id)
-	var names := []
-	for staffer_id in staffer_ids:
-		names.append(String(GameState.staffers.get(staffer_id, {}).get("name", staffer_id)))
-
-	var btn := Button.new()
-	btn.custom_minimum_size = CARD_MIN_SIZE
-	btn.clip_text = true
-	btn.text = "%s\n%s" % [STATION_LABELS[station_id], String("\n").join(names) if not names.is_empty() else "(empty)"]
-	btn.modulate = Color(1.0, 0.75, 0.75) if names.is_empty() else Color(0.85, 1.0, 0.85)
-	btn.disabled = _selected_staffer_id == ""
-	btn.pressed.connect(_on_station_pressed.bind(station_id))
-	return btn
+	_station_row.add_child(StationCard.make_button("kitchen", _selected_staffer_id, _on_assigned))
 
 
 func _on_staffer_pressed(staffer_id: String) -> void:
@@ -120,7 +69,6 @@ func _on_staffer_pressed(staffer_id: String) -> void:
 	refresh()
 
 
-func _on_station_pressed(station_id: String) -> void:
-	Sim.assign_staffer(_selected_staffer_id, station_id)
+func _on_assigned() -> void:
 	_selected_staffer_id = ""
 	refresh()

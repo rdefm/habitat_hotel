@@ -8,3 +8,6 @@ export_presets.cfg
 
 # Generated batch-sim CSV reports (debug tooling output, not source)
 /debug_output/
+
+# Locally-downloaded Godot editor binaries, not project source
+/Godot_v*.exe

@@ -1,0 +1,354 @@
+[NON-CANONICAL — see docs/adr/0006-vision-chunk-docs-non-canonical.md. This brief's
+architecture, file tree, and terminology were never built; the shipped game follows
+hotel_habitat_plan.md + docs/adr/0001-0005 instead. Mechanics mined from this doc
+(stacking, training, traits, bellhop escort) are re-specified in docs/adr/0008,
+0012-0015 in this game's actual vocabulary — read those, not this file, as current.]
+
+Habitat Hotel — Chunk 2 Implementation Brief (Milestone M2: "Hands")
+
+Audience: a fresh Claude Code session with no prior context, working in the existing Habitat Hotel GitHub repo (Chunk 1 / M1 is already built and merged). This document is self-contained — read it fully before writing any code, then read the repo (Step 0) so you conform to what M1 actually shipped.
+
+Engine: Godot 4.x, GDScript only (no C#). The exact version is pinned in PINNED_VERSION.md at repo root — use that binary, do not upgrade or change it. All code targets the Godot 4 API — never Godot 3 (await not yield; @onready, @export; CharacterBody2D; Callable-based signals). If unsure whether an API is 4.x, check the installed version's docs, not memory.
+
+Open design decision carried into this brief (flag for review, do not silently change): Training uses a hybrid model — staff gain skill passively by working a station, and the player may optionally put a staffer into a directed Training state to raise one skill faster. Training costs no money (the economy is still M3); the only cost is that a training staffer is off the floor. If the design owner wants a different training model, that's a design conversation — build the hybrid as specified here and note it in DECISIONS.md.
+
+Part A — What You Are Building and Why
+
+Habitat Hotel is a cozy, funny hotel-management sim about running a hotel for animals, for mobile (portrait), premium one-off purchase. The core verb is matching arriving guests to rooms by hand under light, never-stressful time pressure. M1 shipped that core loop: a four-phase day, morning checkouts → dirty rooms → an abstract housekeeping service cleaning them, an afternoon arrival queue with patience moods, and drag-to-seat with gold/amber matching, party splits, pop-ins, save/load, and a night summary.
+
+Chunk 2 = Milestone M2: "Hands" — staff and the cleaning gamble. M1's automatic housekeeping becomes a staff you allocate by hand. You are adding four named staff members, station assignment, a skill + training system, rush-cleaning, bellhop-driven check-in/checkout timing, staff traits, and the screens to see and move your people. The empty-station dilemma — if you pull someone off reception to rush a clean, reception is now empty — is the new toy.
+
+The playtest question this chunk must answer:
+
+"Does pulling a staffer off their station mid-queue to rush a clean feel like a delicious risk — not an annoying chore?"
+
+Everything you build serves that question. The M1 playtest question ("is seating guests fun for ten days?") must stay answered — do not regress the matching feel. Anything not needed for M2 is out of scope (Part H).
+
+Design pillars (constrain every decision)
+The player is the concierge, not the spreadsheet. Staff make the matching game tenser, they don't replace it with a management screen.
+Pressure, never stress. An unstaffed station degrades gracefully, never catastrophically. Every squeeze has a release valve. Pause is always available.
+Flavor is signal. Every trait is one cost, one benefit, one joke — and the joke teaches the mechanic.
+Setbacks are stories. No fail states. The worst outcome of a bad staffing call is a small recoverable dent and a funny moment.
+What changes from M1 (the heart of this chunk)
+Housekeeping is now people. M1's abstract auto-cleaner is gone. Rooms only get cleaned if at least one staffer is assigned to the Housekeeping station. Clean speed scales with that staffer's Housekeeping skill. Two housekeepers clean two rooms in parallel. Zero housekeepers → rooms just stay dirty (graceful degradation — the day still completes, you just have fewer bookable rooms).
+Stations are staffed by allocation, not by "Heads." There is no Head-per-station concept. The player freely assigns any number of staff (including zero, or all four) to any station. Assignment is drag-and-drop, one thumb, sub-second.
+Reception staffing slows queue patience decay. Empty reception → patience decays at the base (faster) rate. Staffed → slower, scaling with Reception skill.
+Bellhop adds check-in / checkout timing. Bellhops do not perform the check-in decision (the player still drags the guest to the room). Instead, after you seat a guest, a bellhop escorts them up — check-in now takes a few sim-seconds, faster with more/higher-skill bellhops, and grants a small satisfaction boost. With no bellhop, check-in still happens (self-service) but slower and with a small satisfaction nick. At morning checkout, a bellhop assigned to the hotel makes checkouts faster and a little earlier, which flips rooms to dirty sooner and buys more cleaning time before the afternoon rush.
+Rush-clean. Drag any staffer onto a specific dirty room to have them clean that room in parallel with the normal housekeeping order, then auto-return to their previous station when the clean finishes. Pulling the Receptionist to rush a clean (leaving reception empty, patience decaying) is the signature move.
+Skills + training. Every staffer has a skill level in all four station skills, lopsided by personality. Skills rise passively while working a station and faster via a directed Train assignment. Soft cap.
+Traits. 4–5 active traits, each with one mechanical cost, one benefit, and one joke.
+You can see and move your people. Staff appear in the hotel as sprites and in a roster/staff menu. Tapping a staffer (in the hotel or the menu) opens a detail card: placeholder portrait, per-station skill bars, level/XP, and traits.
+Kitchen station: present but inert
+
+The Kitchen station exists as a valid assignment target and appears in data, but has no effect in M2 (dining is M4). A staffer assigned to Kitchen simply gains Kitchen XP and does nothing else. Do not build any dining/meal logic. (Kitchen is in so the assignment UI and save schema are complete now.)
+
+Part B — Operating Instructions for This Session
+
+Step 0 — Read the repo before writing anything.
+
+Clone/open the existing repo. Read PINNED_VERSION.md, DECISIONS.md, and the full sim/ and game/ trees from M1.
+Confirm the actual command names, event names, SimGame API, balance.json shape, and save schema that M1 shipped. This brief uses the names from the M1 brief (seat_guest, build_room, guest_arrived, guest_walked, room_state_changed, clean_started/clean_finished, day_summary_ready, etc.). If M1's DECISIONS.md renamed any of these, follow the repo, not this brief, and note the mapping in a short comment at the top of your first new file.
+Verify tests still pass on main before you touch anything: godot --headless --script res://tests/run_tests.gd. If they don't, stop and report — do not build on a red baseline.
+Create a branch: m2-hands.
+
+Step 1 — Sim first, presentation second. Extend the pure sim/ layer (Part C, E) and its headless tests (Part F) before touching game/. A staffing feature is not "done" until its headless test passes. Commit small and often.
+
+Step 2 — Build outward in this order: staff data + state + assignment → housekeeping rewritten as staff-driven cleaning → reception patience modifier → bellhop check-in escort → bellhop checkout timing → rush-clean with auto-return → skills passive gain → directed training → traits → save schema v2 + migration → presentation (staff sprites, station drop-zones, roster menu, detail card, drag-to-assign, drag-to-rush-clean) → polish drag feel.
+
+Working rules (unchanged from M1 — honor them):
+
+Small, frequent commits with descriptive messages.
+After each sim feature: add/extend headless tests and run them. No sim feature is done until its test passes.
+Keep files focused; several small classes over one god-object.
+All tunable numbers live in data/balance.json — zero magic numbers in code.
+All content (staff, traits) lives in data/*.json — zero content in code.
+If this document is ambiguous, choose the simplest option consistent with the pillars and record it in DECISIONS.md. Do not invent features not named in Parts C–G.
+UI text placeholder tone: dry, warm, specific. No exclamation marks in system text.
+Do not regress M1. The matching interaction must feel identical or better. If a staff change would alter M1 behavior in a way not specified here, stop and record the tension in DECISIONS.md.
+Part C — Architecture: How Staff Fit the M1 Split (load-bearing)
+
+The prime rule is unchanged: sim/ never touches game/, and game/ never mutates sim state directly. Staff obey it too. The UI asks the sim to move a staffer (a command); the sim decides what happens and emits events; the UI animates.
+
+New / changed sim/ files
+sim/
+  sim_staff.gd        # NEW. Staff roster: identity, per-station skills+xp, current
+                      #   assignment/state, trait ids, training target. RefCounted.
+                      #   Owns: assignment logic, XP accrual + level-ups, trait hooks.
+  sim_rooms.gd        # CHANGED. Housekeeping is no longer an abstract auto-service.
+                      #   Cleaning is driven by staff assigned to Housekeeping + rush-cleans.
+  sim_matching.gd     # CHANGED. seat_guest now starts a bellhop ESCORT (check-in process)
+                      #   instead of occupying instantly. Room is reserved at command time.
+  sim_queue.gd        # CHANGED. Patience decay rate is modulated by Reception staffing.
+  sim_clock.gd        # (likely) CHANGED. Checkout at morning is now a short bellhop-
+                      #   influenced process, not instantaneous.
+  sim_economy_stub.gd # CHANGED only so satisfaction records include the bellhop
+                      #   check-in modifier. Still a stub — no wages, no rep. (Economy = M3.)
+  sim_save.gd         # CHANGED. schema_version → 2. Serialize the full staff block +
+                      #   in-progress escorts/cleans/training. Migrate v1 → v2 on load.
+  sim_game.gd         # CHANGED. Route the new commands; own sim_staff; drain its events.
+  sim_state.gd        # CHANGED. Add staff[], per-room cleaning-worker refs, escorts[],
+                      #   season field already exists (leave as "summer").
+New commands (UI → sim, via SimGame.submit(command))
+
+The sim validates every command and rejects invalid ones with a surfaced result. Never trust the UI.
+
+Command	Payload	Meaning
+assign_staff	{staff_id, station}	station ∈ "reception" | "bellhop" | "housekeeping" | "kitchen" | "off_duty". Persistent until changed. Cancels any active training for that staffer.
+rush_clean	{staff_id, room_id}	Temporarily send this staffer to clean this specific dirty room in parallel; remember their prior station; auto-return when the clean finishes. Invalid if room isn't dirty or staffer is mid-escort/training.
+train_staff	{staff_id, skill}	skill ∈ the four station skills. Puts staffer in training state (off the floor) on that skill. Money-free.
+seat_guest	(existing — payload unchanged)	Now starts a check-in escort rather than occupying instantly. See Part E.
+
+Keep existing M1 commands (build_room, set_speed, next_day, and whatever M1 actually named them) working unchanged.
+
+New events (sim → UI outbox, drained each frame)
+
+staff_assigned {staff_id, station} · staff_state_changed {staff_id, state} (states: working, walking, escorting, cleaning, rush_cleaning, training, off_duty) · checkin_started {guest_id, room_id, staff_id_or_null} · checkin_finished {guest_id, room_id, satisfaction} · checkout_started {room_id, staff_id_or_null} · clean_started {room_id, staff_id} · clean_finished {room_id, staff_id} · rush_clean_started {room_id, staff_id} · rush_clean_finished {room_id, staff_id} · skill_leveled {staff_id, skill, new_level} · training_started {staff_id, skill} · training_ended {staff_id, skill} · station_understaffed {station} (emitted once when a station relevant to the current phase drops to 0 staff; used for the soft chime).
+
+Keep existing M1 events. Where M1 already emits clean_started/clean_finished, extend them with staff_id (they were previously worker-less). Update M1's presentation consumers accordingly.
+
+Fixed timestep & determinism are unchanged and non-negotiable: sim advances at ticks_per_sim_second ticks/sim-second; one seeded RNG owned by the sim; same seed + same command sequence ⇒ identical outcomes. All new staff logic (XP, trait rolls if any, cleaning order) must be deterministic and serialize into the save. This is a test invariant (Part F).
+
+Part D — Data Schemas & Content
+data/staff.json — the starting roster (4 named staff)
+
+Skills are integer levels 1–5. Each staffer starts with an xp value per skill (0 unless noted) and exactly the traits listed. home_station is their initial assignment.
+
+json
+{
+  "pete": {
+    "display_name": "Pete",
+    "portrait": "placeholder_pete",
+    "home_station": "reception",
+    "skills": {"reception": 4, "bellhop": 2, "housekeeping": 1, "kitchen": 2},
+    "traits": ["chatterbox"]
+  },
+  "rosa": {
+    "display_name": "Rosa",
+    "portrait": "placeholder_rosa",
+    "home_station": "housekeeping",
+    "skills": {"reception": 1, "bellhop": 2, "housekeeping": 4, "kitchen": 2},
+    "traits": ["perfectionist"]
+  },
+  "bo": {
+    "display_name": "Bo",
+    "portrait": "placeholder_bo",
+    "home_station": "bellhop",
+    "skills": {"reception": 2, "bellhop": 4, "housekeeping": 2, "kitchen": 1},
+    "traits": ["brisk"]
+  },
+  "wren": {
+    "display_name": "Wren",
+    "portrait": "placeholder_wren",
+    "home_station": "off_duty",
+    "skills": {"reception": 2, "bellhop": 2, "housekeeping": 2, "kitchen": 3},
+    "traits": ["deep_sleeper", "quick_study"]
+  }
+}
+
+Design intent of this roster (do not change without a DECISIONS.md note): Rosa is your cleaner, Bo your bellhop, Pete your desk, Wren your flexible spare who starts Off Duty — so the player learns assignment on turn one by deploying Wren, and the default single-cleaner setup keeps the morning→afternoon cleaning race tight. Wren being a Deep Sleeper teaches that trait the first time a player uses them to rush-clean in the morning and it's slow.
+
+data/traits.json — 5 active + 1 dormant
+
+Each trait = one cost, one benefit, one joke. All effect magnitudes are references into balance.json (see traits block) — no numbers baked into content beyond ids. Keep the one-line blurb (shown on the detail card) dry and specific.
+
+json
+{
+  "chatterbox": {
+    "display_name": "Chatterbox",
+    "blurb": "Slower to get anyone checked in. Somehow the queue doesn't mind waiting.",
+    "effects": {"checkin_duration_mult": 1.25, "reception_patience_aura_bonus": 0.15}
+  },
+  "perfectionist": {
+    "display_name": "Perfectionist",
+    "blurb": "Cleans slowly. Cleans completely — the next guest notices.",
+    "effects": {"clean_duration_mult": 1.25, "next_stay_satisfaction_bonus": 8}
+  },
+  "brisk": {
+    "display_name": "Brisk",
+    "blurb": "Fastest check-in in the building. No small talk, and guests feel it.",
+    "effects": {"checkin_duration_mult": 0.8, "checkin_satisfaction_delta": -4}
+  },
+  "deep_sleeper": {
+    "display_name": "Deep Sleeper",
+    "blurb": "A liability before mid-morning. Sharpens up by evening.",
+    "effects": {"morning_effectiveness_mult": 0.6, "evening_effectiveness_mult": 1.2}
+  },
+  "quick_study": {
+    "display_name": "Quick Study",
+    "blurb": "Learns fast. Started a little behind, though.",
+    "effects": {"xp_gain_mult": 1.5}
+  },
+  "snack_thief": {
+    "display_name": "Snack Thief",
+    "blurb": "[dormant until the kitchen opens]",
+    "effects": {},
+    "dormant": true
+  }
+}
+
+snack_thief is defined so the schema is complete but has no effect in M2 (its cost/benefit live in the kitchen, which is M4). Do not implement it.
+
+How traits attach to systems: trait effects are read by the sim wherever the relevant number is computed (clean duration, check-in duration, patience aura, phase effectiveness, XP gain, next-stay bonus). Implement them as small, named lookups in sim_staff.gd (e.g. effective_clean_mult(staff), effective_checkin_mult(staff)), so each system asks one function and traits compose cleanly. Do not scatter if trait == ... branches through the sim.
+
+data/balance.json — additions (all tunable; starting guesses)
+
+Add a staff block and a traits block. Do not remove or rename existing M1 keys. If a value here conflicts with something M1 already defines, prefer the M1 key and note it in DECISIONS.md.
+
+json
+{
+  "staff": {
+    "skill_max_level": 5,
+    "skill_clean_duration_mult_by_level":   [1.6, 1.3, 1.0, 0.8, 0.65],
+    "skill_checkin_duration_mult_by_level": [1.6, 1.3, 1.0, 0.8, 0.65],
+    "reception_patience_decay_mult_by_level": [0.90, 0.80, 0.70, 0.60, 0.50],
+    "no_reception_patience_decay_mult": 1.0,
+
+    "checkin_duration_sim_seconds": 4,
+    "checkin_no_bellhop_duration_mult": 2.0,
+    "checkin_no_bellhop_satisfaction_nick": 8,
+    "checkin_satisfaction_boost_by_bellhop_level": [0, 2, 4, 6, 8],
+
+    "checkout_duration_sim_seconds": 6,
+    "checkout_with_bellhop_duration_mult": 0.5,
+    "checkout_with_bellhop_early_offset_sim_seconds": 4,
+
+    "rush_clean_return_delay_sim_seconds": 2,
+
+    "xp_per_sim_second_working": 1.0,
+    "xp_per_sim_second_training": 3.0,
+    "xp_cumulative_thresholds_by_level": [0, 40, 100, 200, 350]
+  },
+  "traits": {
+    "note": "Effect magnitudes are read from data/traits.json effects; this block holds only global caps if needed later. Leave empty for M2 unless a value must be tuned separately."
+  }
+}
+
+Notes on the numbers: level 3 is the baseline (mult 1.0) so the level-1↔5 spread is symmetric and easy to reason about. xp_cumulative_thresholds_by_level[0]=0 means "start of level 1." These are starting guesses — the balance instrument tests (Part F #5, #6) tell you if they're right before you open the editor.
+
+Starting state (day 1, fresh game)
+
+Same hotel as M1 (3 floors × 4 plots; pre-built 1 Cozy Nook, 1 Roost Loft, 2 Lagoon Rooms; balance.starting_cash). Plus the four staff from staff.json at their home_station (Pete→reception, Rosa→housekeeping, Bo→bellhop, Wren→off_duty). Everyone starts at their listed skills/xp.
+
+Part E — Simulation Rules (precise)
+
+Everything below is deterministic and sim-time-based (so 1x and 2x are identical difficulty). "Effectiveness" for a staffer at a station = the level-based multiplier combined with any trait phase multiplier (Deep Sleeper etc.) and Quick Study for XP.
+
+1. Assignment
+assign_staff sets a staffer's persistent station. Valid stations: reception, bellhop, housekeeping, kitchen, off_duty. Off Duty = idle, no effect, available to be pulled instantly.
+Assigning cancels active training and ends any in-progress rush-clean's auto-return target (if reassigned mid-rush-clean, they finish the current room then honor the new assignment instead of the old one — record this rule in DECISIONS.md).
+Any number of staff per station, including zero and all four. No caps.
+Emit staff_assigned. If the change drops a phase-relevant station to zero, emit station_understaffed once.
+2. Housekeeping = staff-driven cleaning (replaces M1 auto-service)
+Dirty rooms form an ordered list in the order they became dirty (unchanged from M1).
+Each staffer assigned to Housekeeping cleans one room at a time, taking the next unclaimed dirty room in order. Multiple housekeepers ⇒ multiple rooms cleaned in parallel (one worker per room; a room is never worked by two).
+Clean duration for a room worked by staffer S = clean_duration_sim_seconds (existing M1 base) × skill_clean_duration_mult_by_level[S.housekeeping_level-1] × S trait clean mult (Perfectionist 1.25) × S phase effectiveness (Deep Sleeper morning 0.6 → slower, so divide effectiveness in or express consistently — be explicit in code and comment the direction).
+Zero housekeepers ⇒ no cleaning happens. Rooms stay dirty. The day still completes normally. This is the graceful-degradation pillar; it is not a bug.
+Emit clean_started {room_id, staff_id} / clean_finished {room_id, staff_id}. A room is seatable the instant its clean finishes, including mid-afternoon-queue.
+Perfectionist next-stay bonus: when a Perfectionist finishes a room, flag the room; the next stay seated there gets +next_stay_satisfaction_bonus satisfaction, then the flag clears.
+3. Rush-clean (the signature move)
+rush_clean {staff_id, room_id}: valid only if the room is dirty and the staffer is not mid-escort or training. The staffer leaves their current station (record prior_station), walks to the room (a short travel delay is fine — reuse presentation tween; sim may treat travel as ~0 or a small fixed sim-time, your call, record it), and cleans that specific room in parallel with the normal order — genuinely adding throughput.
+Uses the staffer's Housekeeping skill + traits exactly like a normal clean.
+On finish: emit rush_clean_finished, then after rush_clean_return_delay_sim_seconds the staffer auto-returns to prior_station (emit staff_assigned back). If the player reassigned them during the rush-clean, honor the newest assignment instead.
+The whole point: pulling the Receptionist to rush a clean leaves reception empty (patience decays faster) while a room is turned early. That tradeoff must be felt, not hidden.
+4. Reception & patience
+Patience base is unchanged from M1 (base_patience_sim_seconds × species.patience_mult).
+While ≥1 staffer is assigned to Reception, patience decays at rate × reception_patience_decay_mult_by_level[best_reception_level-1] (use the highest Reception level currently on the desk; multiple receptionists don't stack beyond that — record this in DECISIONS.md).
+Empty reception → decay × no_reception_patience_decay_mult (i.e. base, fastest).
+Chatterbox aura: if a Chatterbox is assigned to Reception, add reception_patience_aura_bonus as an additional slowdown (further multiply decay down). This is Chatterbox's benefit that offsets its slow-check-in cost.
+Soft-slow while press-holding a guest, and hard pause, are unchanged from M1 and apply globally.
+5. Check-in = bellhop escort (replaces M1 instant seating)
+
+This is the biggest change to the M1 loop — preserve the feel: the player still drags the guest to the room and that decision resolves instantly from their POV; the escort is a short animation-backed delay, not a second interaction.
+
+On a valid seat_guest: immediately reserve the target room (fit evaluation now treats it as unavailable so it can't be double-booked), remove the guest from the queue, set the party to escorting, and start a check-in task. Emit checkin_started.
+With a free bellhop: a bellhop staffer escorts (one party at a time per bellhop; multiple bellhops escort multiple parties in parallel). Duration = checkin_duration_sim_seconds × skill_checkin_duration_mult_by_level[bellhop_level-1] × bellhop trait checkin mult (Brisk 0.8, Chatterbox 1.25) × phase effectiveness. On finish, apply satisfaction boost = checkin_satisfaction_boost_by_bellhop_level[level-1] plus any trait checkin_satisfaction_delta (Brisk −4).
+With no free bellhop: the party self-checks-in. Duration = checkin_duration_sim_seconds × checkin_no_bellhop_duration_mult; apply satisfaction nick = −checkin_no_bellhop_satisfaction_nick. (Check-in still completes — graceful degradation.)
+If several parties are seated while bellhops are busy, they wait their turn to be escorted (a check-in queue), or self-check-in if no bellhop exists at all. Keep this simple and deterministic; document the ordering rule.
+On completion: room flips to occupied, stay clock starts, emit checkin_finished {satisfaction}. Finalize the stay's stored satisfaction here = the M1 seat-time base (base + likes − amber/split/partial penalties, clamped) adjusted by the bellhop boost/nick and any Perfectionist next-stay bonus, re-clamped to [0, satisfaction_cap].
+6. Checkout = bellhop-assisted (was instantaneous in M1)
+At Morning start, rooms whose stay is complete begin checkout. Checkout now takes checkout_duration_sim_seconds.
+If ≥1 bellhop is assigned: checkout duration × checkout_with_bellhop_duration_mult (faster) and checkouts begin checkout_with_bellhop_early_offset_sim_seconds earlier (proactive help). Faster + earlier checkout ⇒ room flips to dirty sooner ⇒ cleaning can start sooner ⇒ more cleaning time before the afternoon rush. This is the reward for keeping a bellhop on.
+If no bellhop: checkouts run at full duration, no early offset.
+Emit checkout_started, then the existing M1 guest_checked_out when the room actually flips dirty (credit the placeholder cash exactly as M1 did — do not change the economy). Keep magnitudes small so this wrinkle nudges the cleaning race without dominating it.
+7. Skills & training (hybrid)
+Passive (learning by doing): while a staffer is actively working a station (reception with a queue present, bellhop escorting, housekeeping cleaning — define "working" as actively performing the station's task, not merely assigned-and-idle; record your exact rule in DECISIONS.md), they gain that station's XP at xp_per_sim_second_working × trait xp mult (Quick Study 1.5) per sim-second.
+Directed training: train_staff {staff_id, skill} puts the staffer in the training state — off the floor, contributing nothing to any station — gaining the chosen skill's XP at xp_per_sim_second_training (× trait xp mult). Emit training_started. Ends on any assign_staff/rush_clean for that staffer (emit training_ended). No money cost.
+Level-ups: XP is cumulative per skill; when it crosses xp_cumulative_thresholds_by_level[n], the level becomes n+1 (1-indexed levels). Emit skill_leveled. Soft cap at skill_max_level (5): XP may keep accruing but level never exceeds 5.
+The advertised payoff (vision §4): a well-trained Housekeeper eventually turns every morning checkout before the afternoon rush. That must emerge naturally from Rosa reaching level 5 housekeeping — verify via the pacing test at high skill.
+8. Everything else unchanged from M1
+
+Matching/fit evaluation (gold/amber/none), party split & partial seating rules and their satisfaction penalties, pop-ins, arrival generation, the night summary, build menu, save-at-night. Do not alter M1 rules except where Part E explicitly changes them. The fit function still comes from the single authoritative sim function — the UI never computes glow colors itself.
+
+9. Day summary additions
+
+Extend the M1 night summary with a small staff line (plain, one screen): rooms cleaned per staffer, rush-cleans performed, any skill level-ups today, and check-ins handled by bellhop vs self-service. Keep it readable; no new screens.
+
+Part F — Headless Test Harness (required, not optional)
+
+Run: godot --headless --script res://tests/run_tests.gd (exit 0 on pass; non-zero + readable failure otherwise). All M1 tests must still pass — if a staff change breaks one, fix the design, not the test, unless the test encoded behavior Part E deliberately changes (then update the test and note it in DECISIONS.md).
+
+Add these M2 tests (tests construct SimGame directly and drive it with synthetic commands + advance(dt)):
+
+Determinism (extended): same seed + same command sequence including staff assignments, rush-cleans, and training for 10 days ⇒ byte-identical serialized final state.
+Save/load roundtrip (extended, schema v2): save mid-day-3 with staff mid-escort, mid-clean, and mid-training; load into a fresh SimGame; run both 3 more days with identical commands ⇒ identical state. Also assert a v1 save migrates to v2 (load a stored v1 fixture ⇒ default staff block injected, no crash).
+Housekeeping is staff-gated: with zero housekeepers, assert no room ever leaves dirty; day still completes; no error. With one housekeeper, rooms clean serially. With two, assert two rooms are cleaning simultaneously (true parallelism).
+Skill affects clean speed: a level-5 housekeeper cleans a room measurably faster than a level-1 one (assert duration ratio ≈ the balance multipliers).
+Cleaning-race pacing (balance instrument): with the default roster (Rosa alone on housekeeping) and a busy morning (4 checkouts), assert the last clean_finished lands inside the afternoon phase (the intended tension). Then assert that adding a bellhop's earlier/faster checkout shifts the first clean_started earlier than with no bellhop.
+Queue clearability at 1x == 2x (balance instrument): an "attentive bot" that seats the best available option the instant it exists and manages staff (keeps reception + housekeeping + bellhop covered, rush-cleans when a needed room is dirty) clears a max-arrivals day with zero impatient walk-aways at 1x; assert byte-identical at 2x (patience is sim-time).
+Rush-clean parallel + auto-return: a staffer assigned to reception is rush-cleaned onto a specific dirty room; assert (a) that room cleans in parallel with the normal order, (b) reception is empty during the rush (patience decays faster — assert the rate change), (c) the staffer auto-returns to reception after rush_clean_return_delay_sim_seconds.
+Bellhop check-in timing & satisfaction: with a bellhop, check-in completes in the expected time and applies the level's satisfaction boost; with no bellhop, check-in takes the no_bellhop multiple and applies the nick; the reserved room is never double-booked (fit returns NONE for it during escort).
+Training raises skill: directed training crosses a threshold faster than passive working over the same sim-time; level caps at 5; Quick Study trains 1.5× faster; determinism preserved.
+Trait truth table: Perfectionist clean is slower and flags a next-stay bonus that the next seated stay consumes; Brisk check-in is faster with a satisfaction delta; Deep Sleeper is slower in morning, faster in evening; Chatterbox slows check-in but adds reception patience aura. One assertion per trait.
+Ten-day soak (extended): bot plays 10 days on 5 seeds with varied staff usage ⇒ no crashes, cash never NaN, and invariants hold: no room simultaneously dirty+occupied; no room worked by two cleaners; every escorting party ends up either seated or (never — escorts always complete) — assert escorts resolve; no staffer in two states at once; queue empty at day end.
+
+Tests 5, 6, and 9 are the balance instruments — they tell you if balance.json still makes the day work (and whether training pays off) before you open the editor.
+
+Part G — Presentation Layer (placeholder visuals, real feel)
+
+Same viewport/stretch/filter as M1 (portrait, 540×960, canvas_items, nearest-neighbor, touch-compatible input: press/drag/release only, no hover-dependent behavior). All visuals still go through game/stubs/sprite_factory.gd — extend it for staff; do not draw elsewhere or add art/emoji.
+
+New/changed presentation
+Staff sprites in the hotel. Each staffer is a SpriteFactory node (colored rounded rect + 2-letter initials + a tiny station badge). They walk between stations and to rooms they rush-clean (Tween). A staffer cleaning stands at the room; escorting a guest walks a ghost guest chip up; off-duty sits in a break-room strip. Movement is how the player reads their staffing at a glance (lobby-vignette-as-status, per the vision).
+Station drop-zones. Give each station (reception desk, bellhop post, housekeeping cart, kitchen — kitchen shown but visibly inert/greyed) a clear drop target with an assigned-count badge. Dragging a staff sprite onto a zone issues assign_staff. Dragging a staff sprite onto a dirty room tile issues rush_clean (the room highlights as a valid rush target only while dirty).
+Understaffed cue. When a phase-relevant station hits zero staff, a soft chime + a small icon on that station (drive off station_understaffed). Gentle, not alarming — this is a worst-least choice prompt, not a failure.
+Roster / Staff menu. A button in the HUD opens a roster panel listing the four staff (name, current station, a one-glyph trait hint). Auto-pauses like every menu.
+Staff detail card (opened by tapping a staffer in the hotel or in the roster): placeholder portrait (SpriteFactory block using the portrait id), name, four skill bars (level 1–5 + XP-to-next as a sliver), traits with their one-line blurb, current assignment, and buttons to assign to a station or start training (pick a skill). Closing resumes prior speed.
+Room tiles (extended). Cleaning tiles show which staffer + progress sliver; a rush-cleaned tile reads distinctly from a normal clean. An escorting room shows a "being checked in" state (reserved, guest en route) so the player sees the seat "took." Keep the mid-queue "fresh flash" when a clean finishes (M1) — it's how a rush-clean gamble visibly pays off.
+Interaction feel (spend real effort here — this is the product): dragging a staffer must be as crisp as dragging a guest — press lifts the sprite, valid drop targets highlight, invalid drops nudge-shake, a satisfying snap on assign. Pulling the receptionist onto a dirty room and watching reception's patience meter start to climb, then the staffer sprint back, is the emotional core of the chunk. Make that legible.
+Guest seating feel unchanged. Do not regress M1's drag-to-seat. The only visible change: after the drop, the guest is escorted up rather than teleporting into the room.
+
+Build menu, HUD speed/pause, day summary: unchanged except the summary's new staff line (Part E.9).
+
+Part H — Explicitly OUT of Scope for Chunk 2
+
+Do not build any of the following, even partially, even as stubs beyond what's specified above:
+
+Hiring, firing, or a fifth staffer — the roster is exactly the four in staff.json.
+Wages, salaries, or any staff cost — the economy is still the M1 stub; real cash/Hearts/reputation is M3.
+Kitchen/dining work — Kitchen is an assignable, XP-earning, otherwise inert station. No meals, no Daily Special, no walk-ins. (M4.)
+Snack Thief's actual effect — defined dormant only. (M4.)
+Reviews, Hearts, reputation, stars, star checklists/ceremony, price menu, room upgrades (M3).
+The Daily Trumpet and any forecast UI (M3).
+Pool, Pool Duty, events hall, weddings (M4–M5).
+Seasons beyond the dormant season field (stays "summer"; M5).
+Sound/music, real art, tutorial-as-first-day, localization.
+
+If you find yourself creating a system not named in Parts C–G, stop and re-read Part H.
+
+Part I — Definition of Done
+All M1 tests and all Part F M2 tests pass headlessly; the project runs from the editor with no errors (and no warnings-as-errors).
+A human can play 10 consecutive days and:
+freely drag staff between stations (including onto zero and all-on-one setups),
+rush-clean a specific dirty room by dragging a staffer onto it and watch them auto-return,
+feel the empty-station tradeoff (pull the receptionist → patience visibly speeds up),
+see check-in take time (bellhop faster, no-bellhop slower with a nick) and bellhop checkouts buy cleaning time,
+open the staff detail card from both the hotel and the roster, and start training a skill,
+watch a skill level up and see a well-trained housekeeper turn rooms faster over the run,
+and still enjoy the M1 matching loop unchanged.
+Pause/1x/2x all work; 2x is not harder (provable via test 6).
+balance.json changes alone tune the chunk with no code edits — verify by (a) dropping every skill_*_mult to 1.0 (skills stop mattering) and (b) doubling checkin_no_bellhop_duration_mult, then re-running tests 5–11.
+Save schema is v2, a v1 save migrates cleanly, and a relaunch mid-run resumes at the correct day/state including staff assignments, in-progress cleans/escorts, and training/XP.
+DECISIONS.md lists every judgment call made this chunk (especially: the hybrid-training decision flagged at the top; the "what counts as working for passive XP" rule; multi-receptionist stacking rule; reassign-during-rush-clean behavior). PINNED_VERSION.md is unchanged.
+PLAYTEST.md is updated with the M2 playtest question — "Does pulling a staffer off their station mid-queue to rush a clean feel like a delicious risk, not an annoying chore?" — plus 3–4 things to watch: Is the empty-station penalty felt but never punishing? Does rush-clean auto-return read clearly? Does training feel worth doing within ten days? Do bellhop check-ins slow the loop too much?
+
+Hand-back: when done, summarize in chat — what was built, M1+M2 test results, any DECISIONS.md entries that deserve design review (lead with the training model), and your honest read on the staffing pacing after playing it yourself via the bot tests: with the default roster, is the cleaning race tight but winnable, and does pulling a staffer feel like the good kind of scary?

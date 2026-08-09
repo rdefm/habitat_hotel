@@ -1,0 +1,242 @@
+[NON-CANONICAL — see docs/adr/0006-vision-chunk-docs-non-canonical.md. This brief's
+architecture, file tree, and terminology were never built; the shipped game follows
+hotel_habitat_plan.md + docs/adr/0001-0005 instead. Read for mechanic ideas only —
+specific mechanics mined from these docs are re-specified in docs/adr/0007 onward.]
+
+Habitat Hotel — Chunk 1 Implementation Brief (Milestone M1: "The Afternoon")
+
+Audience: a fresh Claude Code session with no prior context. This document is self-contained — read it fully before writing any code.
+
+Engine: Godot 4.x, GDScript only (no C#). The exact version is pinned in Step 0 below. All code must target the Godot 4 API — never Godot 3 (no yield, no onready var without @, no KinematicBody2D; use await, @onready, CharacterBody2D, Callable signals, etc.). If unsure whether an API is 4.x, check the installed version's docs, not memory.
+
+Part A — What You Are Building and Why
+
+Habitat Hotel is a cozy, funny hotel-management sim about running a hotel for animals, for mobile (portrait), premium one-off purchase. The player's core verb: matching arriving guests to rooms by hand, under light (never stressful) time pressure.
+
+Chunk 1 = Milestone M1: the core loop skeleton. A playable day cycle where guests check out in the morning, housekeeping races to turn rooms over, an arrival queue forms in the afternoon, and the player drags guests into rooms. Placeholder visuals, real feel.
+
+The playtest question this chunk must answer: "Is seating guests fun for ten consecutive in-game days, with nothing else in the game?" Everything you build serves that question. Everything not needed for it is out of scope (Part H).
+
+Design pillars (constrain every decision)
+The player is the concierge, not the spreadsheet. Matching by hand is the game.
+Pressure, never stress. Patience decays slowly; pause is always available; nothing punishes hard.
+Flavor is signal. (Mostly later chunks — but even placeholder text should be dry, warm, specific.)
+Setbacks are stories. No fail states. A guest walking away is a small miss, not a punishment.
+The day (four phases, in-game "sim time")
+Phase	What happens	Player's job
+Morning	Guests whose stay ended check out → rooms flip dirty → housekeeping cleans them one at a time, in order.	Watch the race set up; build on empty plots.
+Afternoon (main event)	The arrival queue forms at reception. Rooms cleaned in time are bookable; rooms still dirty can finish cleaning during the queue.	Drag guests to rooms. The whole game.
+Evening	Stragglers; quiet wind-down.	Light touch.
+Night	Instant interstitial: day summary screen, next day's arrivals generated, save.	Read summary, tap to start next day.
+
+Pop-ins: small chance of an off-schedule arrival in morning or evening — a readiness check, not a rush.
+
+The day's spine: checkouts happen hours (of sim time) before the afternoon rush. The tension is "will housekeeping turn the rooms in time?" Tune the balance numbers so that on a busy day, 1–2 rooms are still mid-clean when the queue forms.
+
+The matching interaction (the heart — get this feel right)
+Queued guests show: species icon (placeholder), party size, needs as tag chips, likes as fainter chips, and a patience face (3 states: content → huffy → leaving-soon).
+Tap/press a queued guest → compatible rooms glow on the grid: gold = covers all needs and fits the party; amber = fits the party but misses ≥1 need. Incompatible rooms (too small for even a split remainder, occupied, dirty, locked) don't glow.
+Drag guest → room to seat them. Dropping on an amber room shows a one-line confirm dialog naming the missing tag(s) ("The Lagoon Room isn't quiet…") with Seat / Cancel.
+Party rules: if a party exceeds one room's capacity, the player may seat them across multiple rooms — after the first drop, the remaining members stay in the queue as a "remainder" chip and can be dragged to another room (flat satisfaction penalty per extra room used). The player may also seat only part of a party and let the remainder leave (partial seating — remainder walks, no penalty beyond the missed revenue; seated members get a small satisfaction nick).
+Patience: decays in sim time (therefore identical difficulty at 1x and 2x). When it empties, the guest walks: logged as turned away, small grumpy exit, no other penalty. Species have patience multipliers (tortoise ≈ effectively infinite; pigeon short).
+Pause is honorable: pressing a queued guest soft-slows sim time to 0.3x while held/selected; the pause button hard-stops it. Every menu auto-pauses.
+What "fun" depends on (tuning intent)
+A full queue must be comfortably clearable by an attentive player at 1x and 2x.
+The interesting moments are: choosing amber vs. waiting for a clean to finish; splitting a big party; triaging when two impatient parties want the same room. The generator (Part E) must produce these situations regularly but not constantly.
+Part B — Operating Instructions for This Session
+
+Step 0 — Environment. Check godot --version. If Godot isn't installed: download the latest stable 4.x Linux/macOS/Windows binary (as appropriate) from the official GitHub releases (godotengine/godot), unzip, and put it on PATH (or use a local ./godot and reference it consistently). Then record the exact version string in PINNED_VERSION.md at repo root — every future chunk brief will cite that file. Verify headless mode works: godot --headless --version.
+
+Step 1 — Skeleton first. Create the project structure (Part C), the balance/data files (Part D–E), and a walking skeleton: sim that advances phases + one guest seated via code + one headless test passing. Commit.
+
+Step 2 — Build outward in this order: sim day cycle → arrivals/queue/patience → matching & seating rules → cleaning race → save/load → presentation layer (grid, queue UI, drag) → build menu → day summary → speed/pause controls → polish pass on drag feel.
+
+Working rules:
+
+Small, frequent commits with descriptive messages.
+After each sim feature: add/extend headless tests (Part F) and run them. Do not consider a sim feature done until its test passes.
+Keep files focused; prefer several small classes over one god-object.
+All tunable numbers live in data/balance.json — zero magic numbers in code.
+All content (species, rooms) lives in data/*.json — zero content in code.
+If this document is ambiguous on a detail, choose the simplest option consistent with the pillars, and record the decision in DECISIONS.md at repo root. Do not invent new features.
+UI text placeholder tone: dry, warm, specific. No exclamation marks in system text.
+Part C — Project Structure & Architecture (load-bearing for all future chunks)
+habitat-hotel/
+  project.godot
+  PINNED_VERSION.md
+  DECISIONS.md
+  data/
+    balance.json          # every tunable number
+    species.json          # all 8 species (even those unused in M1)
+    rooms.json            # all 7 room types
+  sim/                    # PURE simulation. RefCounted only. No Node, no scene-tree,
+                          # no Input, no rendering. Deterministic. Fully headless-runnable.
+    sim_game.gd           # top-level sim: owns state, advance(dt), command intake
+    sim_state.gd          # the entire mutable game state (serializable)
+    sim_clock.gd          # phases, day counter, sim-time
+    sim_arrivals.gd       # nightly arrival-list generation + pop-ins (seeded RNG)
+    sim_queue.gd          # queue entries, patience, walk-aways
+    sim_rooms.gd          # room states (vacant/occupied/dirty/cleaning), housekeeping service
+    sim_matching.gd       # fit evaluation (gold/amber/none), seating, party split
+    sim_economy_stub.gd   # placeholder cash + per-stay satisfaction record (real economy = M3)
+    sim_events.gd         # event definitions + queue (sim → presentation)
+    sim_save.gd           # versioned JSON serialize/deserialize of sim_state
+  game/                   # Presentation. Nodes/scenes. Consumes sim events, sends commands.
+    main.tscn / main.gd
+    grid/                 # hotel grid view, room tiles, glow states
+    queue/                # queue strip, guest chips, patience faces
+    hud/                  # top bar, speed controls, pause
+    build/                # build menu (minimal)
+    summary/              # night summary screen
+    stubs/sprite_factory.gd  # ALL visuals created here (see Part G)
+  tests/
+    run_tests.gd          # headless entry point
+    test_*.gd             # one file per area
+
+The prime architectural rule: sim/ never touches game/, and game/ never mutates sim state directly.
+
+Commands in: the UI calls SimGame.submit(command) with typed command dictionaries, e.g. {type="seat_guest", guest_id, room_id, party_count}, {type="build_room", plot_id, room_type}, {type="set_speed", value}. The sim validates every command (never trust the UI) and rejects invalid ones with a result the UI can surface.
+Events out: the sim appends typed events to an outbox each tick, e.g. guest_arrived, guest_seated, guest_walked, room_state_changed, phase_changed, day_summary_ready, clean_finished. Presentation drains the outbox each frame and animates accordingly. Presentation may read sim state for display but never writes it.
+Fixed timestep: sim advances at 8 ticks per sim-second; presentation interpolates. Game speed (pause/1x/2x/soft-slow) scales how much sim-time elapses per real frame — inside the clock, so all sim logic is speed-agnostic.
+Determinism: one seeded RNG owned by the sim (sim_state.rng_seed + call counter or state serialized). Same seed + same command sequence ⇒ identical outcomes. This is a test invariant, not a nice-to-have.
+Save: sim_save.gd writes {schema_version: 1, ...state} as JSON to user://save.json at each Night phase. Loading a higher schema_version than known fails gracefully. Every future chunk migrates the schema forward; that's why it exists now.
+
+Why this matters for future chunks: M2 adds staff as new sim systems + new commands; M3 attaches economy/reviews to events you're already emitting; M5 adds seasons to a clock that already has the field. If sim and presentation stay cleanly split, every future chunk is additive.
+
+Part D — Data Schemas & Content
+data/species.json — ship all 8, even though M1 uses 5
+json
+{
+  "pigeon":       {"display_name": "Pigeon",       "tier": 1, "needs": ["high_perch"],                    "likes": [],           "budget": "low",  "party_min": 1, "party_max": 6, "stay_min": 1, "stay_max": 2, "patience_mult": 0.6,  "weight": 1.0},
+  "capybara":     {"display_name": "Capybara",     "tier": 1, "needs": ["warm", "water"],                 "likes": ["quiet"],    "budget": "low",  "party_min": 1, "party_max": 3, "stay_min": 2, "stay_max": 4, "patience_mult": 1.2,  "weight": 1.0},
+  "tortoise":     {"display_name": "Tortoise",     "tier": 1, "needs": ["warm", "dry"],                   "likes": ["quiet"],    "budget": "low",  "party_min": 1, "party_max": 1, "stay_min": 3, "stay_max": 6, "patience_mult": 10.0, "weight": 0.8},
+  "penguin":      {"display_name": "Penguin",      "tier": 2, "needs": ["cold", "water"],                 "likes": ["quiet"],    "budget": "mid",  "party_min": 1, "party_max": 4, "stay_min": 1, "stay_max": 3, "patience_mult": 1.0,  "weight": 0.9},
+  "flamingo":     {"display_name": "Flamingo",     "tier": 2, "needs": ["warm", "water"],                 "likes": ["spacious"], "budget": "mid",  "party_min": 2, "party_max": 6, "stay_min": 1, "stay_max": 2, "patience_mult": 0.8,  "weight": 0.9},
+  "bat":          {"display_name": "Bat",          "tier": 3, "needs": ["dark", "high_perch"],            "likes": ["quiet"],    "budget": "mid",  "party_min": 1, "party_max": 8, "stay_min": 1, "stay_max": 2, "patience_mult": 1.0,  "weight": 0.8},
+  "polar_bear":   {"display_name": "Polar Bear",   "tier": 3, "needs": ["cold", "spacious"],              "likes": ["water"],    "budget": "high", "party_min": 1, "party_max": 2, "stay_min": 2, "stay_max": 5, "patience_mult": 1.1,  "weight": 0.6},
+  "snow_leopard": {"display_name": "Snow Leopard", "tier": 4, "needs": ["cold", "high_perch", "quiet"],   "likes": ["spacious"], "budget": "high", "party_min": 1, "party_max": 1, "stay_min": 3, "stay_max": 7, "patience_mult": 1.5,  "weight": 0.4}
+}
+
+M1 spawns species with tier <= balance.max_guest_tier (set to 2). Budget is stored but unused in M1.
+
+data/rooms.json — ship all 7
+json
+{
+  "cozy_nook":     {"display_name": "Cozy Nook",     "tags": ["warm", "dry", "quiet"],            "capacity": 2, "nightly_rate": 40,  "build_cost": 800,  "tier": 1},
+  "roost_loft":    {"display_name": "Roost Loft",    "tags": ["high_perch", "dry"],               "capacity": 6, "nightly_rate": 35,  "build_cost": 1000, "tier": 1},
+  "lagoon_room":   {"display_name": "Lagoon Room",   "tags": ["warm", "water"],                   "capacity": 3, "nightly_rate": 60,  "build_cost": 1800, "tier": 1},
+  "veranda_suite": {"display_name": "Veranda Suite", "tags": ["warm", "water", "spacious"],       "capacity": 6, "nightly_rate": 90,  "build_cost": 2600, "tier": 2},
+  "ice_grotto":    {"display_name": "Ice Grotto",    "tags": ["cold", "water"],                   "capacity": 4, "nightly_rate": 120, "build_cost": 3000, "tier": 2},
+  "cavern_suite":  {"display_name": "Cavern Suite",  "tags": ["dark", "quiet", "high_perch"],     "capacity": 8, "nightly_rate": 150, "build_cost": 5000, "tier": 3},
+  "tundra_hall":   {"display_name": "Tundra Hall",   "tags": ["cold", "spacious"],                "capacity": 2, "nightly_rate": 180, "build_cost": 6500, "tier": 3}
+}
+
+M1 build menu shows rooms with tier <= balance.max_room_tier (set to 2).
+
+Starting hotel
+
+Grid: 3 floors × 4 plots (12 plots) all unlocked in M1 (star-gating is M3). Pre-built: 1 Cozy Nook, 1 Roost Loft, 2 Lagoon Rooms. Remaining 8 plots empty. Starting cash: balance.starting_cash.
+
+data/balance.json — initial values (all tunable; these are starting guesses)
+json
+{
+  "schema_version": 1,
+  "ticks_per_sim_second": 8,
+  "phase_lengths_sim_seconds": {"morning": 30, "afternoon": 50, "evening": 20},
+  "speed_soft_slow": 0.3,
+  "max_guest_tier": 2,
+  "max_room_tier": 2,
+  "starting_cash": 2000,
+  "grid_floors": 3,
+  "grid_plots_per_floor": 4,
+  "clean_duration_sim_seconds": 14,
+  "base_patience_sim_seconds": 35,
+  "patience_states": {"content_above": 0.6, "huffy_above": 0.25},
+  "arrivals_per_day_min": 2,
+  "arrivals_per_day_max": 5,
+  "arrivals_ramp_by_day": [[1, 2, 3], [4, 2, 4], [7, 3, 5]],
+  "popin_chance_morning": 0.15,
+  "popin_chance_evening": 0.2,
+  "party_split_satisfaction_penalty": 10,
+  "partial_seating_satisfaction_penalty": 8,
+  "amber_missing_need_satisfaction_penalty": 25,
+  "satisfaction_base": 70,
+  "satisfaction_per_like_met": 10,
+  "satisfaction_cap": 100
+}
+
+(arrivals_ramp_by_day: from day N, min/max arrivals — a gentle difficulty ramp across the ten-day playtest.)
+
+Part E — Simulation Rules (precise)
+
+Clock. Sim-time flows through morning → afternoon → evening at the configured lengths, then Night (no duration — sim halts, emits day_summary_ready, and waits for a {type="next_day"} command). Day counter starts at 1. A season field exists in state (always "summer" in M1) so the schema is future-proof.
+
+Nightly generation. At Night, generate tomorrow's arrival list (seeded RNG): draw N parties (per arrivals_ramp_by_day), each with species (weighted, tier-filtered), party size, and stay length (uniform in species range). Assign each party an arrival offset within the afternoon phase (spread across the first 70% of it). Independently roll pop-ins for morning/evening. Store the full list in state — future chunks will read this for the Trumpet forecast, so it must exist as data the night before, even though M1 shows the player nothing.
+
+Checkout. At Morning start, every occupied room whose stay is complete checks out simultaneously: emit guest_checked_out (with the stay's final satisfaction), credit cash = nightly_rate × nights × party members in that room (placeholder economy), flip room to dirty, append it to the housekeeping order.
+
+Housekeeping. One abstract housekeeping service (staff arrive in M2): cleans dirty rooms strictly one at a time, in the order they became dirty, clean_duration_sim_seconds each, running through morning/afternoon/evening. Emits clean_started / clean_finished. A room becomes seatable the moment cleaning finishes — including mid-queue. (Design intent: with 3–4 checkouts, the last room finishes partway into the afternoon. Verify with the pacing test.)
+
+Queue & patience. Arriving parties append to the queue and emit guest_arrived. Patience = base_patience_sim_seconds × species.patience_mult, decays only while in the queue, paused while the player is press-holding that guest (soft-slow also applies globally). At 0: emit guest_walked with reason "impatient", log to the turn-away record (data for future chunks), remove. If a party can't fit anywhere at all it still just waits out its patience — no special case.
+
+Fit evaluation (sim_matching.gd, single authoritative function — the UI's glow colors come from asking the sim, never from UI-side logic):
+
+GOLD: room vacant+clean, capacity ≥ party count being placed, room tags ⊇ species needs.
+AMBER: room vacant+clean, capacity ≥ party count being placed, ≥1 need missing.
+NONE: otherwise (occupied, dirty, cleaning, capacity 0 remaining… ).
+
+Seating & satisfaction. On a valid seat_guest command: occupy the room (or partially — see party rules in Part A), start the stay clock (stays are measured in nights; a guest seated on day D with stay S checks out on morning of day D+S). Record a per-stay satisfaction value at seating time: satisfaction_base + per_like_met×likes_met − amber_penalty×needs_missing − split/partial penalties, clamped to [0, cap]. Store it on the stay; report it at checkout and in the day summary. (Reviews/Hearts/reputation consume this in M3 — the number just needs to exist and be right.)
+
+Build. build_room on an empty plot: validate cash and tier, deduct, place instantly, emit room_built. No build menu forecast section in M1 (the Trumpet replaces it in M3).
+
+Day summary (Night screen). Show: day number, cash delta, guests seated / walked (with reasons), perfect fits vs. amber seats, occupancy %, mean satisfaction of today's checkouts, and rooms cleaned. Plain, readable, one screen. Then a single button: "Open tomorrow."
+
+Part F — Headless Test Harness (required, not optional)
+
+Run via: godot --headless --script res://tests/run_tests.gd (exit code 0 on pass, non-zero with readable failure output). Because sim/ is pure RefCounted, tests construct SimGame directly and drive it with synthetic commands and advance(dt) calls — no scene tree needed.
+
+Minimum test suite:
+
+Determinism: same seed + same scripted command sequence for 10 days ⇒ byte-identical serialized final state.
+Save/load roundtrip: save at night of day 3, load into a fresh SimGame, run both originals and loaded copies 3 more days with the same commands ⇒ identical state.
+Fit function truth table: every species × every room ⇒ assert expected GOLD/AMBER/NONE (this doubles as a design-data regression test — e.g. flamingo×veranda_suite must be GOLD).
+Party split math: a 6-pigeon party across two rooms produces correct occupancy and correct satisfaction penalties; partial seating produces a walked remainder with no extra penalties.
+Cleaning race pacing: with 4 morning checkouts, assert the last clean_finished lands inside the afternoon phase (the intended tension), not before it starts and not after it ends.
+Queue clearability: an "attentive bot" policy (always seats the best available option the moment it exists) clears a max-arrivals day with zero impatient walk-aways at 1x — and, because patience is sim-time, the same test at 2x is definitionally identical (assert it anyway).
+No-space day: more arrivals than capacity ⇒ excess walk with reason logged, sim never errors, day completes.
+Ten-day soak: bot plays 10 days on 5 different seeds ⇒ no crashes, cash never NaN, all invariants hold (no room simultaneously dirty+occupied, queue empty at day end, etc.).
+
+Tests 5 and 6 are the balance instruments — when tuning balance.json, these tell you whether the day still works before you ever open the editor.
+
+Part G — Presentation Layer (placeholder visuals, real feel)
+
+Viewport: portrait. Base logical resolution 540×960, canvas_items stretch mode, expand aspect, nearest-neighbor default texture filter (pixel-art-ready). Desktop dev window is fine; input must be written touch-compatible (all interactions = press / drag / release; no hover-dependent or right-click behavior).
+
+Layout (top to bottom): HUD bar (cash, day, phase name, phase-progress bar, pause/1x/2x) → queue strip (horizontally scrollable guest chips) → hotel grid (3 floors × 4 plots, the largest region) → bottom strip (context line + button to reopen last day summary).
+
+The SpriteFactory rule: every visual entity (guest chip, room tile, tag chip, patience face) is created through game/stubs/sprite_factory.gd, which currently returns programmer-art nodes: ColorRect + Label compositions (species = colored rounded rect + 2-letter code; tags = small labeled chips; patience = colored dot: green/amber/red). No emoji, no downloaded assets, no drawing outside the factory. When real pixel art arrives in a later chunk, only this file changes.
+
+Interaction feel (spend real effort here — this is the product):
+
+Press a guest chip → it lifts slightly, compatible rooms glow (gold/amber borders + slight brightness), sim soft-slows.
+Drag → a ghost of the chip follows the finger; the currently-hovered room highlights stronger; invalid rooms give a tiny "nudge away" shake if dropped on.
+Drop on gold → satisfying snap animation into the tile, small scale-pop, queue chip departs. Drop on amber → confirm dialog (auto-pauses), then the same snap.
+Room tiles show: room name, tag chips, occupancy pips (filled per guest), and state tint (vacant / occupied / dirty with a small broom icon placeholder / mid-clean with a progress sliver).
+Cleaning finishing mid-queue should be noticeable: the tile does a small "fresh" flash so the player catches the moment a gamble pays off.
+Every menu (build, summary, amber confirm) pauses the sim; closing resumes prior speed.
+
+Build menu: tap empty plot → simple list of available rooms (name, tag chips, capacity, cost; grayed if unaffordable) → tap to build. Instant, no confirm beyond the tap.
+
+Part H — Explicitly OUT of Scope for Chunk 1
+
+Do not build any of the following, even partially, even as stubs beyond what's specified above: staff/stations/traits/rush-clean (M2) · Hearts, reputation, reviews, stars, prices menu, upgrades (M3) · The Daily Trumpet and any forecast UI (M3) · dining, pool, events hall (M4–M5) · seasons beyond the dormant state field (M5) · sound/music · real art · tutorial · localization. If you find yourself creating a system not named in Parts C–G, stop and re-read Part H.
+
+Part I — Definition of Done
+All Part F tests pass headlessly, and the project runs from the editor with no errors or warnings-as-errors.
+A human can play 10 consecutive days: seating via drag, gold/amber matching with confirm, party splitting, cleaning race visibly resolving mid-afternoon, pop-ins occurring, build menu working, save persisting across app restarts (relaunch resumes at the correct day/state).
+Pause/1x/2x all work; 2x is not harder (patience is sim-time — provable via test 6).
+balance.json changes alone can make days easier/harder with no code edits (verify by doubling arrivals_per_day_max and re-running tests 5–8).
+DECISIONS.md lists every judgment call made; PINNED_VERSION.md records the exact Godot version.
+A short PLAYTEST.md explains how to run the game and the tests, and states the playtest question: "Is seating guests fun for ten consecutive days?" — with 3–4 things to watch for (queue too easy/too frantic? ambers feel like choices? mornings feel idle?).
+
+Hand-back: when done, summarize in the chat: what was built, test results, any DECISIONS.md entries that deserve design review, and your honest read on the pacing numbers after playing it yourself via the bot tests.

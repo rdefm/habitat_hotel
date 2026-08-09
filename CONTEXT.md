@@ -42,7 +42,22 @@ A named individual with a Skill rating at every Station (lopsided toward a home 
 _Avoid_: Employee, hire
 
 **Skill**:
-A Staffer's 1–5 rating at a given Station. Determines service speed at that Station (cleaning time, meal service time, etc.).
+A Staffer's 1–5 rating at a given Station. Determines service speed at that Station (cleaning time, meal service time, etc.). Rises passively while a Staffer actively works a Station, or faster via Training. See [[0012-staff-skill-progression]].
+
+**Training**:
+A Staffer assignment state that trades Station work for faster Skill growth in one chosen Station. Free (no cash/Hearts cost) — the only cost is the Staffer being off the floor while training. See [[0012-staff-skill-progression]].
+
+**Trait**:
+A Staffer modifier with one mechanical cost and one benefit (e.g., Perfectionist cleans slower but boosts the next stay's satisfaction). Distinct from Skill (a numeric per-Station rating) and from a Species' Needs/Likes. See [[0013-traits-become-mechanical]].
+
+**Job**:
+A single unit of Housekeeping or Kitchen work with one target — a Room to clean, or a Diner/breakfast entry to serve. One or more Staffers can be assigned to the same Job. See [[0008-staffer-stacking-on-jobs]].
+
+**Stacking**:
+Assigning a second Staffer to a Job already in progress at Housekeeping or Kitchen, summing Skill to finish faster. Capped at 2 Staffers per Job; Reception and Bellhop have no per-target Job to Stack on. See [[0008-staffer-stacking-on-jobs]].
+
+**Escort**:
+The Bellhop's timed delivery of a just-seated Party from Reception to their Room, replacing instant check-in whenever a Bellhop Staffer is free. See [[0014-bellhop-escorted-checkin]].
 
 **Roster**:
 The set of Staffers currently unlocked and available for Station assignment. Grows via milestone unlocks (star level, cash, story beats) — never a procedurally generated hire/fire pool. See [[0002-staff-roster-unlocks]].
@@ -71,10 +86,10 @@ A queue entry's (Party, Walk-in Diner, or Dining Party) tolerance timer. Decays 
 A 0–100 meter within the current Star level. Rises on positive reviews (from Checkouts and served Dining guests alike) and falls on negative reviews and walk-aways.
 
 **Hearts**:
-The quality meta-currency, earned from happy Checkouts and well-served Dining guests. Spent on training, Room/Terrace upgrades, and Roster unlocks.
+The quality meta-currency, earned from happy Checkouts and well-served Dining guests. Spent on Room/Terrace upgrades and Roster unlocks — not Training, which is free. See [[0012-staff-skill-progression]].
 
 **Star**:
-The hotel's overall rating, 1–5, a ratchet that never decreases. Gates which Species tiers, Room types, and Roster unlocks are available.
+The hotel's overall rating, 1–5, a ratchet that never decreases. Gates which Room types and Roster unlocks are available — no longer gates which Species tiers can arrive. See [[0007-species-demand-not-star-gated]].
 
 ### Building
 

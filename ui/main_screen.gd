@@ -8,6 +8,7 @@ extends Control
 
 const HotelPanel = preload("res://ui/hotel_panel.gd")
 const ReceptionPanel = preload("res://ui/reception_panel.gd")
+const StationPanel = preload("res://ui/station_panel.gd")
 const PopupHost = preload("res://ui/popup_host.gd")
 const SeatConfirmMenu = preload("res://ui/seat_confirm_menu.gd")
 const StayInfoMenu = preload("res://ui/stay_info_menu.gd")
@@ -43,6 +44,7 @@ var _overlay_content: Control
 var _popup_host: PopupHost
 var _hotel_panel: HotelPanel
 var _reception_panel: ReceptionPanel
+var _station_panel: StationPanel
 
 
 func _ready() -> void:
@@ -59,6 +61,9 @@ func _ready() -> void:
 	_reception_panel = ReceptionPanel.new()
 	_reception_panel.party_selected.connect(_on_party_selected)
 	root.add_child(_reception_panel)
+
+	_station_panel = StationPanel.new()
+	root.add_child(_station_panel)
 
 	var middle := HBoxContainer.new()
 	middle.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -344,3 +349,4 @@ func close_menu() -> void:
 		_overlay_content = null
 	Clock.set_paused(false)
 	_hotel_panel.refresh()
+	_station_panel.refresh()

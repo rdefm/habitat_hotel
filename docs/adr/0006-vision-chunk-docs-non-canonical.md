@@ -1,0 +1,7 @@
+# plans/vision-chunk-*.txt are non-canonical; mined for mechanics only
+
+`plans/vision-chunk-1.txt` and `plans/vision-chunk-2.txt` are self-contained implementation briefs for a fresh Claude Code session, but they describe a fully alternate, never-built game: a different file tree (`sim_game.gd`/`sim_state.gd`/`game/`), a command-queue-in/event-outbox-out sim architecture, gold/amber match terminology, a four-person starting roster (Pete/Rosa/Bo/Wren), and a different `traits.json`. None of it was implemented — what actually shipped follows `hotel_habitat_plan.md`'s Chunk 0-8 structure and ADRs 0001-0005 instead, with entirely different names and shapes throughout.
+
+A 2026-08 grilling session considered adopting these docs' architecture and vocabulary wholesale and rejected it: vision-chunk-1 isn't even internally consistent about "guest" vs. "party," so there's no clean target to rename to, and the command-queue sim split would be a full rewrite for no gameplay benefit the current `GameState`/`Sim`/`EventBus` split doesn't already deliver. Instead, specific mechanics were mined from vision-chunk-2 and re-specified in this project's actual vocabulary (Party/Staffer/Station/Skill, not guest/gold) in ADRs 0008 and 0012-0015. Future sessions should not assume `plans/vision-chunk-*.txt` describes the current codebase, or treat it as anything more than a source of ideas already filtered through the ADRs that cite it.
+
+Status: accepted.
