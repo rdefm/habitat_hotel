@@ -9,6 +9,7 @@ extends Control
 const HotelPanel = preload("res://ui/hotel_panel.gd")
 const ReceptionPanel = preload("res://ui/reception_panel.gd")
 const StationPanel = preload("res://ui/station_panel.gd")
+const TerracePanel = preload("res://ui/terrace_panel.gd")
 const PopupHost = preload("res://ui/popup_host.gd")
 const SeatConfirmMenu = preload("res://ui/seat_confirm_menu.gd")
 const StayInfoMenu = preload("res://ui/stay_info_menu.gd")
@@ -45,6 +46,7 @@ var _popup_host: PopupHost
 var _hotel_panel: HotelPanel
 var _reception_panel: ReceptionPanel
 var _station_panel: StationPanel
+var _terrace_panel: TerracePanel
 
 
 func _ready() -> void:
@@ -64,6 +66,10 @@ func _ready() -> void:
 
 	_station_panel = StationPanel.new()
 	root.add_child(_station_panel)
+
+	_terrace_panel = TerracePanel.new()
+	_terrace_panel.terrace_tapped.connect(_on_terrace_tapped)
+	root.add_child(_terrace_panel)
 
 	var middle := HBoxContainer.new()
 	middle.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -160,7 +166,6 @@ func _build_menu_bar() -> HBoxContainer:
 		["Prices", func(): return PricesMenu.new()],
 		["Hire", func(): return HireMenu.new()],
 		["Roster", func(): return RosterMenu.new()],
-		["Terrace", func(): return TerraceMenu.new()],
 		["Reports", func(): return ReportsMenu.new()],
 		["Reviews", func(): return ReviewsMenu.new()],
 	]
@@ -203,6 +208,12 @@ func _on_hotel_slot_selected(room_type_id: String, instance_id: int) -> void:
 		return
 
 	_open_upgrade_menu(room_type_id, instance_id)
+
+
+## --- Terrace (ticket 05, ADR-0010: always-visible structure, tap for the modal) ---
+
+func _on_terrace_tapped() -> void:
+	open_menu("Terrace", TerraceMenu.new())
 
 
 func _open_upgrade_menu(room_type_id: String, instance_id: int) -> void:
@@ -350,3 +361,4 @@ func close_menu() -> void:
 	Clock.set_paused(false)
 	_hotel_panel.refresh()
 	_station_panel.refresh()
+	_terrace_panel.refresh()

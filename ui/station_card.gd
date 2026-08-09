@@ -9,8 +9,8 @@ extends RefCounted
 ## as harmless no-ops and already interrupts only the moved Staffer's own
 ## in-flight job -- then calls on_assigned so the caller can clear its own
 ## selection and refresh. Shared by ui/station_panel.gd
-## (Reception/Bellhop/Housekeeping, ticket 04) and ui/roster_menu.gd
-## (Kitchen, until ticket 05 moves it onto the Terrace).
+## (Reception/Bellhop/Housekeeping, ticket 04) and ui/terrace_menu.gd
+## (Kitchen, ticket 05).
 
 const Station = preload("res://sim/station.gd")
 

@@ -5,7 +5,8 @@ extends RefCounted
 ## Staffer's per-Station Skill summary and current Station, highlighted
 ## while selected. Tapping calls on_pressed(staffer_id) so the caller (which
 ## owns the "which Staffer is selected" state) can toggle selection and
-## refresh. Shared by ui/station_panel.gd and ui/roster_menu.gd.
+## refresh. Shared by ui/station_panel.gd, ui/terrace_menu.gd, and
+## ui/roster_menu.gd (the latter renders it disabled, read-only).
 
 const Station = preload("res://sim/station.gd")
 

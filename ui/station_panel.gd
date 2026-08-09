@@ -3,13 +3,13 @@ extends VBoxContainer
 
 ## Reception/Bellhop/Housekeeping Station slots, always visible near
 ## Reception (ticket 04, ADR-0009) -- relocated out of the Roster menu,
-## which now handles only Kitchen (ui/roster_menu.gd) until ticket 05 moves
-## that onto the Terrace too, at which point the Roster menu is retired
-## entirely (ticket 06). Tap a Staffer card then a Station card to
-## (re)assign them there, mirroring Reception's tap-Party/tap-Room flow --
-## same Sim.assign_staffer() call and interruption semantics the old Roster
-## menu used, via the StafferCard/StationCard widgets shared with
-## ui/roster_menu.gd so both places stay in lockstep.
+## which no longer does Station assignment at all now that ticket 05 moved
+## Kitchen onto the Terrace's modal too (ui/terrace_menu.gd); the Roster
+## menu is retired entirely in ticket 06. Tap a Staffer card then a Station
+## card to (re)assign them there, mirroring Reception's tap-Party/tap-Room
+## flow -- same Sim.assign_staffer() call and interruption semantics the old
+## Roster menu used, via the StafferCard/StationCard widgets shared with
+## ui/terrace_menu.gd so both places stay in lockstep.
 ##
 ## main_screen.gd calls refresh() when the generic overlay closes, since a
 ## Kitchen (re)assignment made there (still routed through Sim.assign_staffer())

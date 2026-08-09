@@ -1,36 +1,30 @@
 class_name TerraceMenu
 extends VBoxContainer
 
-## The Terrace's own view (ticket 14, ADR-0003): the current breakfast queue,
-## the current Evening walk-in dinner queue with each Diner's Patience state
-## (sim/patience_state.gd, reusing Reception's calm/impatient/huffy tiers --
-## see ticket 14's PatienceState generalization), the Daily Special picker,
-## and the Terrace's own Upgrade list -- reusing UpgradeMenu's purchase-row
-## pattern (tickets 03/13) but addressed by the Terrace's single fixed
-## structure instead of room_type_id + instance_id.
+## The Terrace's modal (ticket 05, ADR-0009/0010): Kitchen Station staffing
+## -- tap a Staffer card then tap the Kitchen card to (re)assign, the same
+## Sim.assign_staffer() call and interruption semantics
+## ui/station_panel.gd uses for Reception/Bellhop/Housekeeping (ticket 04),
+## via the StafferCard/StationCard widgets moved here off ui/roster_menu.gd
+## -- the Daily Special picker, and the Terrace's own Upgrade list (reusing
+## UpgradeMenu's purchase-row pattern (tickets 03/13) but addressed by the
+## Terrace's single fixed structure instead of room_type_id + instance_id).
 ##
-## Opened as a modal from the menu bar like Prices/Hire/Roster/Reports/
-## Reviews, which pauses the Clock (main_screen.open_menu()) -- so unlike
-## ReceptionPanel/HotelPanel, this view doesn't need its own tick_advanced
-## refresh wiring: nothing in Sim moves while it's open, and _refresh() is
-## called again after every mutating action (buying an upgrade, changing the
-## Daily Special).
+## The current Daily Special and the breakfast/dinner queues (with
+## Patience) now live ambiently in ui/terrace_panel.gd instead -- this modal
+## only holds the *interactive* pieces.
 ##
-## A walkin_queue entry with guest_id != -1 is a room guest's dinner add-on
-## (ticket 12) rather than a true Walk-in Diner -- flagged "(Room add-on)"
-## here, matching the "+ Dinner" tag hotel_panel.gd already shows on that
-## guest's Room card.
+## Opened by tapping the Terrace structure (main_screen._on_terrace_tapped
+## -> open_menu()), which pauses the Clock like every other generic-overlay
+## menu -- so this view doesn't need its own tick_advanced refresh wiring.
 
-const PatienceState = preload("res://sim/patience_state.gd")
+const StafferCard = preload("res://ui/staffer_card.gd")
+const StationCard = preload("res://ui/station_card.gd")
 
-const TIER_COLOR := {
-	"calm": Color(0.85, 0.95, 1.0),
-	"impatient": Color(1.0, 0.75, 0.35),
-	"huffy": Color(1.0, 0.45, 0.4),
-}
+var _selected_staffer_id: String = ""
 
-var _breakfast_list: VBoxContainer
-var _dinner_list: VBoxContainer
+var _staffer_row: HBoxContainer
+var _station_row: HBoxContainer
 var _special_option: OptionButton
 var _species_ids_by_option_index: Array = []
 var _stats_label: Label
@@ -50,13 +44,13 @@ func _ready() -> void:
 	body.add_theme_constant_override("separation", 10)
 	scroll.add_child(body)
 
-	body.add_child(_section_header("Breakfast Queue"))
-	_breakfast_list = VBoxContainer.new()
-	body.add_child(_breakfast_list)
-
-	body.add_child(_section_header("Walk-in Dinner Queue"))
-	_dinner_list = VBoxContainer.new()
-	body.add_child(_dinner_list)
+	body.add_child(_section_header("Kitchen Staffing -- tap a Staffer, then tap Kitchen to assign"))
+	_staffer_row = HBoxContainer.new()
+	_staffer_row.add_theme_constant_override("separation", 8)
+	body.add_child(_staffer_row)
+	_station_row = HBoxContainer.new()
+	_station_row.add_theme_constant_override("separation", 8)
+	body.add_child(_station_row)
 
 	body.add_child(_section_header("Daily Special"))
 	body.add_child(_build_special_row())
@@ -88,42 +82,30 @@ func _section_header(text: String) -> Label:
 	return l
 
 
-## --- Breakfast queue (ticket 09) ---
+## --- Kitchen staffing (moved off ui/roster_menu.gd) ---
 
-func _refresh_breakfast() -> void:
-	for child in _breakfast_list.get_children():
+func _refresh_kitchen() -> void:
+	for child in _staffer_row.get_children():
 		child.queue_free()
-	if Sim.breakfast_queue.is_empty():
-		_breakfast_list.add_child(_label("No one waiting for breakfast."))
-		return
-	for entry in Sim.breakfast_queue:
-		var species_id: String = entry["species_id"]
-		var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
-		var room_name: String = GameState.rooms.get(entry["room_type_id"], {}).get("name", entry["room_type_id"])
-		_breakfast_list.add_child(_label("%s x%d -- %s #%d" % [
-			species_name, int(entry["party_size"]), room_name, int(entry["instance_id"]),
-		]))
-
-
-## --- Walk-in dinner queue (tickets 10/12), Patience state (ticket 05's PatienceState) ---
-
-func _refresh_dinner() -> void:
-	for child in _dinner_list.get_children():
+	for child in _station_row.get_children():
 		child.queue_free()
-	if Sim.walkin_queue.is_empty():
-		_dinner_list.add_child(_label("No one waiting for dinner."))
-		return
-	var patience_cfg: Dictionary = GameState.balance["dining"]["walkin_patience"]
-	for entry in Sim.walkin_queue:
-		var species_id: String = entry["species_id"]
-		var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
-		var tier := PatienceState.tier(float(entry["patience"]), patience_cfg)
-		var addon_note := " (Room add-on)" if int(entry.get("guest_id", -1)) != -1 else ""
-		var line := _label("%s the %s x%d -- %s%s" % [
-			entry["name"], species_name, int(entry["party_size"]), tier.capitalize(), addon_note,
-		])
-		line.modulate = TIER_COLOR[tier]
-		_dinner_list.add_child(line)
+
+	var staffer_ids := GameState.staffers.keys()
+	staffer_ids.sort()
+	for staffer_id in staffer_ids:
+		_staffer_row.add_child(StafferCard.make_button(staffer_id, staffer_id == _selected_staffer_id, _on_staffer_pressed))
+
+	_station_row.add_child(StationCard.make_button("kitchen", _selected_staffer_id, _on_assigned))
+
+
+func _on_staffer_pressed(staffer_id: String) -> void:
+	_selected_staffer_id = "" if _selected_staffer_id == staffer_id else staffer_id
+	_refresh_kitchen()
+
+
+func _on_assigned() -> void:
+	_selected_staffer_id = ""
+	_refresh_kitchen()
 
 
 ## --- Daily Special (ticket 10 built where the choice lives; this is the UI) ---
@@ -214,8 +196,7 @@ func _find_terrace_upgrade(upgrade_id: String) -> Dictionary:
 
 
 func _refresh() -> void:
-	_refresh_breakfast()
-	_refresh_dinner()
+	_refresh_kitchen()
 	_refresh_upgrades()
 
 
