@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Direct-manipulation amendments: drag-and-drop, Station relocation, bespoke popups
 

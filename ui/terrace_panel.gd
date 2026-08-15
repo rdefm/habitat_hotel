@@ -16,10 +16,36 @@ extends VBoxContainer
 ## main_screen also calls refresh() when the generic overlay closes, since a
 ## Daily Special change or Kitchen (re)assignment made in the modal doesn't
 ## fire its own signal back to this panel.
+##
+## Stacking (ticket 09, ADR-0008/0009): each breakfast/dinner queue row is a
+## QueueEntryButton, a drop target for a Staffer card (ui/staffer_card.gd's
+## StafferCardButton) dropped onto an entry currently being served, Stacking
+## them onto that Kitchen Job via Sim.can_stack_staffer_on_breakfast()/
+## stack_staffer_on_breakfast() (or the _dinner equivalents) -- rejected (no
+## state change, the dragged card's own reject-flash) for an entry with no
+## in-flight Job at all or one already at Sim.STACK_CAP, mirroring
+## ui/hotel_panel.gd's RoomCellButton.
 
 const PatienceState = preload("res://sim/patience_state.gd")
 
 signal terrace_tapped
+
+class QueueEntryButton extends Button:
+	signal staffer_dropped(staffer_id: String)
+
+	var kind: String = "" # "breakfast" or "dinner"
+	var entry_id: int = -1
+
+	func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
+		if typeof(data) != TYPE_DICTIONARY or data.get("type") != "staffer":
+			return false
+		var staffer_id := String(data["staffer_id"])
+		if kind == "breakfast":
+			return Sim.can_stack_staffer_on_breakfast(staffer_id, entry_id)
+		return Sim.can_stack_staffer_on_dinner(staffer_id, entry_id)
+
+	func _drop_data(_at_position: Vector2, data: Variant) -> void:
+		staffer_dropped.emit(String(data["staffer_id"]))
 
 const TIER_COLOR := {
 	"calm": Color(0.85, 0.95, 1.0),
@@ -89,9 +115,19 @@ func _refresh_breakfast() -> void:
 		var species_id: String = entry["species_id"]
 		var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
 		var room_name: String = GameState.rooms.get(entry["room_type_id"], {}).get("name", entry["room_type_id"])
-		_breakfast_list.add_child(_label("%s x%d -- %s #%d" % [
+		var entry_id: int = int(entry["id"])
+
+		var btn := QueueEntryButton.new()
+		btn.kind = "breakfast"
+		btn.entry_id = entry_id
+		btn.clip_text = true
+		btn.text = "%s x%d -- %s #%d" % [
 			species_name, int(entry["party_size"]), room_name, int(entry["instance_id"]),
-		]))
+		]
+		btn.staffer_dropped.connect(func(staffer_id: String):
+			Sim.stack_staffer_on_breakfast(staffer_id, entry_id)
+		)
+		_breakfast_list.add_child(btn)
 
 
 ## --- Walk-in dinner queue, with Patience ---
@@ -108,11 +144,20 @@ func _refresh_dinner() -> void:
 		var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
 		var tier := PatienceState.tier(float(entry["patience"]), patience_cfg)
 		var addon_note := " (Room add-on)" if int(entry.get("guest_id", -1)) != -1 else ""
-		var line := _label("%s the %s x%d -- %s%s" % [
+		var entry_id: int = int(entry["id"])
+
+		var btn := QueueEntryButton.new()
+		btn.kind = "dinner"
+		btn.entry_id = entry_id
+		btn.clip_text = true
+		btn.text = "%s the %s x%d -- %s%s" % [
 			entry["name"], species_name, int(entry["party_size"]), tier.capitalize(), addon_note,
-		])
-		line.modulate = TIER_COLOR[tier]
-		_dinner_list.add_child(line)
+		]
+		btn.modulate = TIER_COLOR[tier]
+		btn.staffer_dropped.connect(func(staffer_id: String):
+			Sim.stack_staffer_on_dinner(staffer_id, entry_id)
+		)
+		_dinner_list.add_child(btn)
 
 
 func _label(text: String) -> Label:

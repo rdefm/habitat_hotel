@@ -48,6 +48,14 @@ const MatchHint = preload("res://sim/match_hint.gd")
 const Satisfaction = preload("res://sim/satisfaction.gd")
 const Station = preload("res://sim/station.gd")
 
+# Stacking (ADR-0008, ticket 09): up to STACK_CAP Staffers may share one
+# Housekeeping/Kitchen Job, summing their Skill capped at MAX_SKILL (the
+# existing 1-5 scale's max) and looking up the combined ticks in the same
+# per-skill tables _tick_housekeeping()/_tick_breakfast()/_tick_dinner()
+# already use for a single Staffer -- see _ticks_for_skill_sum().
+const STACK_CAP := 2
+const MAX_SKILL := 5
+
 # STAYING guests only, keyed by guest id. Dict: {id, species_id, party_size,
 # nights_total, nights_remaining, room_type_id, room_instance_id, satisfaction, mismatch}.
 var guests: Dictionary = {}
@@ -234,10 +242,21 @@ func assign_staffer(staffer_id: String, station_id: String) -> bool:
 	if not GameState.staffers.has(staffer_id) or not Station.is_valid(station_id):
 		return false
 	if GameState.staffer_station(staffer_id) != station_id:
-		_cleaning_jobs.erase(staffer_id)
-		_breakfast_jobs.erase(staffer_id)
-		_dinner_jobs.erase(staffer_id)
+		_drop_staffer_jobs(staffer_id)
 	return GameState.reassign_staffer(staffer_id, station_id)
+
+
+## Drops staffer_id's own in-flight Job, if any, across all three Job dicts
+## -- a no-op wherever they don't currently have one. Shared by
+## assign_staffer() (dropped only when the Station actually changes) and the
+## stack_staffer_on_*() family (dropped unconditionally, since stacking onto
+## a Job always replaces whatever the dragged Staffer was doing before, even
+## a same-Station Job on a different target -- e.g. a Kitchen Staffer
+## mid-dinner stacked onto a breakfast entry).
+func _drop_staffer_jobs(staffer_id: String) -> void:
+	_cleaning_jobs.erase(staffer_id)
+	_breakfast_jobs.erase(staffer_id)
+	_dinner_jobs.erase(staffer_id)
 
 
 ## Read-only lookup of a Housekeeping Staffer's in-flight job, for UI/tests.
@@ -272,6 +291,136 @@ func walkin_entry(entry_id: int) -> Dictionary:
 ## UI/tests. Returns {} if that Staffer isn't currently serving anyone.
 func dinner_job(staffer_id: String) -> Dictionary:
 	return _dinner_jobs.get(staffer_id, {})
+
+
+## The Staffer id(s) (0, 1, or up to STACK_CAP) currently cleaning the Room
+## addressed by room_type_id + instance_id, for UI/tests -- e.g. whether
+## it's a valid Stacking drop target and whether it's already full.
+func cleaning_staffers(room_type_id: String, instance_id: int) -> Array:
+	var key := MatchHint.room_key({"room_type_id": room_type_id, "instance_id": instance_id})
+	var out: Array = []
+	for staffer_id in _cleaning_jobs:
+		if MatchHint.room_key(_cleaning_jobs[staffer_id]) == key:
+			out.append(staffer_id)
+	return out
+
+
+## The Staffer id(s) currently serving breakfast_queue's entry_id, mirroring
+## cleaning_staffers().
+func breakfast_staffers(entry_id: int) -> Array:
+	var out: Array = []
+	for staffer_id in _breakfast_jobs:
+		if int(_breakfast_jobs[staffer_id]["entry_id"]) == entry_id:
+			out.append(staffer_id)
+	return out
+
+
+## The Staffer id(s) currently serving walkin_queue's entry_id, mirroring
+## cleaning_staffers().
+func dinner_staffers(entry_id: int) -> Array:
+	var out: Array = []
+	for staffer_id in _dinner_jobs:
+		if int(_dinner_jobs[staffer_id]["entry_id"]) == entry_id:
+			out.append(staffer_id)
+	return out
+
+
+## True iff dropping staffer_id onto the Room addressed by room_type_id +
+## instance_id would Stack them onto an already in-flight Housekeeping Job
+## there (ADR-0008, ticket 09) -- i.e. exactly one *other* Staffer is
+## already targeting it. False for a Room with no in-flight Job at all (nothing
+## to stack onto) and for one already at STACK_CAP (a third drop is
+## rejected).
+func can_stack_staffer_on_room(staffer_id: String, room_type_id: String, instance_id: int) -> bool:
+	if not GameState.staffers.has(staffer_id):
+		return false
+	var others := cleaning_staffers(room_type_id, instance_id).filter(func(id): return id != staffer_id)
+	return others.size() == STACK_CAP - 1
+
+
+## Performs the Stack validated by can_stack_staffer_on_room(): pulls
+## staffer_id onto the Housekeeping Station (dropping whatever Job they had
+## before, same as assign_staffer()) and onto this Room's Job specifically,
+## then recomputes ticks_remaining for both Staffers from their summed,
+## capped Skill via the existing clean_ticks_by_skill table -- the same
+## sum-then-cap-then-lookup rule ADR-0008 documents, no second formula.
+## Returns false with no effect if the drop isn't valid.
+func stack_staffer_on_room(staffer_id: String, room_type_id: String, instance_id: int) -> bool:
+	if not can_stack_staffer_on_room(staffer_id, room_type_id, instance_id):
+		return false
+	var other_id: String = cleaning_staffers(room_type_id, instance_id)[0]
+
+	_drop_staffer_jobs(staffer_id)
+	GameState.reassign_staffer(staffer_id, "housekeeping")
+
+	var skill_sum := int(GameState.staffers[staffer_id]["skills"]["housekeeping"]) + int(GameState.staffers[other_id]["skills"]["housekeeping"])
+	var ticks := _ticks_for_skill_sum(_station_balance("housekeeping").get("clean_ticks_by_skill", {}), int(_station_balance("housekeeping").get("default_clean_ticks", 32)), skill_sum)
+	_cleaning_jobs[staffer_id] = {"room_type_id": room_type_id, "instance_id": instance_id, "ticks_remaining": ticks}
+	_cleaning_jobs[other_id]["ticks_remaining"] = ticks
+	return true
+
+
+## True iff dropping staffer_id onto breakfast_queue's entry_id would Stack
+## them onto an already in-flight breakfast Job there, mirroring
+## can_stack_staffer_on_room().
+func can_stack_staffer_on_breakfast(staffer_id: String, entry_id: int) -> bool:
+	if not GameState.staffers.has(staffer_id):
+		return false
+	var others := breakfast_staffers(entry_id).filter(func(id): return id != staffer_id)
+	return others.size() == STACK_CAP - 1
+
+
+## Performs the Stack validated by can_stack_staffer_on_breakfast(), mirroring
+## stack_staffer_on_room() against breakfast_ticks_by_skill.
+func stack_staffer_on_breakfast(staffer_id: String, entry_id: int) -> bool:
+	if not can_stack_staffer_on_breakfast(staffer_id, entry_id):
+		return false
+	var other_id: String = breakfast_staffers(entry_id)[0]
+
+	_drop_staffer_jobs(staffer_id)
+	GameState.reassign_staffer(staffer_id, "kitchen")
+
+	var skill_sum := int(GameState.staffers[staffer_id]["skills"]["kitchen"]) + int(GameState.staffers[other_id]["skills"]["kitchen"])
+	var ticks := _ticks_for_skill_sum(_station_balance("kitchen").get("breakfast_ticks_by_skill", {}), int(_station_balance("kitchen").get("default_breakfast_ticks", 20)), skill_sum)
+	_breakfast_jobs[staffer_id] = {"entry_id": entry_id, "ticks_remaining": ticks}
+	_breakfast_jobs[other_id]["ticks_remaining"] = ticks
+	return true
+
+
+## True iff dropping staffer_id onto walkin_queue's entry_id would Stack them
+## onto an already in-flight dinner Job there, mirroring
+## can_stack_staffer_on_room().
+func can_stack_staffer_on_dinner(staffer_id: String, entry_id: int) -> bool:
+	if not GameState.staffers.has(staffer_id):
+		return false
+	var others := dinner_staffers(entry_id).filter(func(id): return id != staffer_id)
+	return others.size() == STACK_CAP - 1
+
+
+## Performs the Stack validated by can_stack_staffer_on_dinner(), mirroring
+## stack_staffer_on_room() against dinner_ticks_by_skill.
+func stack_staffer_on_dinner(staffer_id: String, entry_id: int) -> bool:
+	if not can_stack_staffer_on_dinner(staffer_id, entry_id):
+		return false
+	var other_id: String = dinner_staffers(entry_id)[0]
+
+	_drop_staffer_jobs(staffer_id)
+	GameState.reassign_staffer(staffer_id, "kitchen")
+
+	var skill_sum := int(GameState.staffers[staffer_id]["skills"]["kitchen"]) + int(GameState.staffers[other_id]["skills"]["kitchen"])
+	var ticks := _ticks_for_skill_sum(_station_balance("kitchen").get("dinner_ticks_by_skill", {}), int(_station_balance("kitchen").get("default_dinner_ticks", 22)), skill_sum)
+	_dinner_jobs[staffer_id] = {"entry_id": entry_id, "ticks_remaining": ticks}
+	_dinner_jobs[other_id]["ticks_remaining"] = ticks
+	return true
+
+
+## Stacking's one shared formula (ADR-0008): the same ticks_by_skill table a
+## single Staffer's Job already looks its own Skill up in, keyed instead by
+## two Staffers' Skill summed and capped at MAX_SKILL -- not a second
+## formula, the same lookup with a different (summed) input.
+func _ticks_for_skill_sum(ticks_by_skill: Dictionary, default_ticks: int, skill_sum: int) -> int:
+	var capped := mini(skill_sum, MAX_SKILL)
+	return int(ticks_by_skill.get(str(capped), default_ticks))
 
 
 func _on_phase_changed(day: int, phase_name: String) -> void:

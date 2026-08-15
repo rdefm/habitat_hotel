@@ -34,28 +34,45 @@ extends VBoxContainer
 ## that Godot's own drag-success bookkeeping -- which the dragged card reads
 ## via gui_is_drag_successful() -- reflects a genuine accept/reject rather
 ## than "some control caught it".
+##
+## Stacking (ticket 09, ADR-0008/0009): the same RoomCellButton also accepts
+## a Staffer card (ui/staffer_card.gd's StafferCardButton) dropped onto a
+## Room currently mid-clean, Stacking it onto that Housekeeping Job via
+## Sim.can_stack_staffer_on_room()/stack_staffer_on_room() -- rejected (no
+## state change, the dragged card's own reject-flash) for a Room with no
+## in-flight Job at all or one already at Sim.STACK_CAP.
 
 signal slot_selected(room_type_id: String, instance_id: int)
 signal seat_attempted(party_id: int, room_type_id: String, instance_id: int, hint: String)
 
 class RoomCellButton extends Button:
 	signal drop_attempted(party_id: int, room_type_id: String, instance_id: int, hint: String)
+	signal staffer_dropped(staffer_id: String, room_type_id: String, instance_id: int)
 
 	var room_type_id: String = ""
 	var instance_id: int = -1
 
 	func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
-		if typeof(data) != TYPE_DICTIONARY or data.get("type") != "party":
+		if typeof(data) != TYPE_DICTIONARY:
 			return false
-		if disabled or instance_id == -1: # a Build Slot is never a seating target
+		if disabled or instance_id == -1: # a Build Slot is never a seating or Stacking target
 			return false
-		var hint: String = Sim.match_hint(int(data["party_id"]), room_type_id, instance_id)
-		return hint != "none"
+		match data.get("type"):
+			"party":
+				return Sim.match_hint(int(data["party_id"]), room_type_id, instance_id) != "none"
+			"staffer":
+				return Sim.can_stack_staffer_on_room(String(data["staffer_id"]), room_type_id, instance_id)
+			_:
+				return false
 
 	func _drop_data(_at_position: Vector2, data: Variant) -> void:
-		var party_id: int = int(data["party_id"])
-		var hint: String = Sim.match_hint(party_id, room_type_id, instance_id)
-		drop_attempted.emit(party_id, room_type_id, instance_id, hint)
+		match data.get("type"):
+			"party":
+				var party_id: int = int(data["party_id"])
+				var hint: String = Sim.match_hint(party_id, room_type_id, instance_id)
+				drop_attempted.emit(party_id, room_type_id, instance_id, hint)
+			"staffer":
+				staffer_dropped.emit(String(data["staffer_id"]), room_type_id, instance_id)
 
 const CELL_MIN_SIZE := Vector2(110, 88)
 const ROW_MIN_HEIGHT := 112
@@ -132,6 +149,7 @@ func _make_cell(room_type_id: String, room_type: Dictionary, instance_id: int, r
 	btn.clip_text = true
 	btn.pressed.connect(_on_cell_pressed.bind(room_type_id, instance_id))
 	btn.drop_attempted.connect(_on_cell_dropped)
+	btn.staffer_dropped.connect(_on_cell_staffer_dropped)
 
 	if room.is_empty():
 		btn.text = "%s\n(build)" % room_type["name"]
@@ -188,3 +206,7 @@ func _on_cell_pressed(room_type_id: String, instance_id: int) -> void:
 
 func _on_cell_dropped(party_id: int, room_type_id: String, instance_id: int, hint: String) -> void:
 	seat_attempted.emit(party_id, room_type_id, instance_id, hint)
+
+
+func _on_cell_staffer_dropped(staffer_id: String, room_type_id: String, instance_id: int) -> void:
+	Sim.stack_staffer_on_room(staffer_id, room_type_id, instance_id)
