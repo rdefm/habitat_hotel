@@ -172,6 +172,7 @@ func _new_room_instance(room_type_id: String, instance_id: int) -> Dictionary:
 		"needs_cleaning": false,
 		"checking_in": false,
 		"checkin_ticks_remaining": 0,
+		"escort_mode": false,
 	}
 
 

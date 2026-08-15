@@ -51,13 +51,13 @@ A Staffer assignment state that trades Station work for faster Skill growth in o
 A Staffer modifier with one mechanical cost and one benefit (e.g., Perfectionist cleans slower but boosts the next stay's satisfaction). Distinct from Skill (a numeric per-Station rating) and from a Species' Needs/Likes. See [[0013-traits-become-mechanical]].
 
 **Job**:
-A single unit of Housekeeping or Kitchen work with one target — a Room to clean, or a Diner/breakfast entry to serve. One or more Staffers can be assigned to the same Job. See [[0008-staffer-stacking-on-jobs]].
+A single unit of Housekeeping, Kitchen, or Bellhop work with one target — a Room to clean, a Diner/breakfast entry to serve, or a just-seated Party to Escort. One or more Staffers can be assigned to a Housekeeping/Kitchen Job; a Bellhop Escort Job is capped at one. See [[0008-staffer-stacking-on-jobs]], [[0017-bellhop-escort-implementation]].
 
 **Stacking**:
-Assigning a second Staffer to a Job already in progress at Housekeeping or Kitchen, summing Skill to finish faster. Capped at 2 Staffers per Job; Reception and Bellhop have no per-target Job to Stack on. See [[0008-staffer-stacking-on-jobs]].
+Assigning a second Staffer to a Job already in progress at Housekeeping or Kitchen, summing Skill to finish faster. Capped at 2 Staffers per Job; Reception has no per-target Job to Stack on, and Bellhop's Escort Job is capped at 1 Staffer so there's nothing to Stack onto either. See [[0008-staffer-stacking-on-jobs]].
 
 **Escort**:
-The Bellhop's timed delivery of a just-seated Party from Reception to their Room, replacing instant check-in whenever a Bellhop Staffer is free. See [[0014-bellhop-escorted-checkin]].
+The Bellhop's timed delivery of a just-seated Party from Reception to their Room, replacing instant check-in whenever a Bellhop Staffer is free. A Skill-scaled per-Staffer Job (mirroring Housekeeping's): every assigned, idle Bellhop Staffer claims and works one Escort at a time in parallel with any other assigned Bellhop; a Party seated while all assigned Bellhops are already escorting waits for the next one to free up rather than falling back to the unstaffed flat delay. See [[0014-bellhop-escorted-checkin]], [[0017-bellhop-escort-implementation]].
 
 **Roster**:
 The set of Staffers currently unlocked and available for Station assignment. Grows via milestone unlocks (star level, cash, story beats) — never a procedurally generated hire/fire pool. See [[0002-staff-roster-unlocks]].

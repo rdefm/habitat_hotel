@@ -13,13 +13,17 @@ extends Node
 ##
 ## Staffers are freely reassignable across the four Stations (ADR-0005) via
 ## assign_staffer() -- GameState.stations holds the assignment, this file
-## drives the effect of (un)staffing each one: Reception's Patience decay
-## rate, Bellhop's check-in delay, and Housekeeping's per-Staffer cleaning
-## jobs (_tick_housekeeping()/_tick_checkins()). Kitchen gates the Terrace's
-## breakfast service (ADR-0003, ticket 09): the Terrace itself is a fixed
-## structure present from Day 1, no build/unlock required, exactly like
-## Reception -- see _populate_breakfast_queue()/_tick_breakfast(). Kitchen
-## also gates the Terrace's Evening Walk-in Diner service (ticket 10), on a
+## drives the effect of (un)staffing each one: Reception's Patience decay rate,
+## Bellhop's Escort (ADR-0014/0017: a staffed Bellhop works a Room's check-in
+## down over a Skill-scaled per-Staffer Job mirroring Housekeeping's, an
+## unstaffed one falls back to a flat presence-only delay -- see
+## _start_checkin()/_tick_checkins()/_tick_escorts()), and Housekeeping's
+## per-Staffer cleaning jobs (_tick_housekeeping()/_tick_checkins()). Kitchen
+## gates the Terrace's breakfast service (ADR-0003, ticket 09): the Terrace
+## itself is a fixed structure present from Day 1, no build/unlock required,
+## exactly like Reception -- see _populate_breakfast_queue()/_tick_breakfast().
+## Kitchen also gates the Terrace's Evening Walk-in Diner service (ticket 10),
+## on a
 ## higher Skill threshold than breakfast and with its own Patience-timered
 ## queue independent of the Room-booking arrivals -- see
 ## _populate_walkin_queue()/_tick_dinner()/_decay_walkin_patience(). A
@@ -94,6 +98,22 @@ var _has_forecast: bool = false
 # and stays true, so no partial credit for an abandoned job.
 var _cleaning_jobs: Dictionary = {}
 
+# Bellhop's in-flight Escort jobs (ADR-0014/0017), one per active Bellhop
+# Staffer: staffer_id -> {room_type_id, instance_id, ticks_remaining}. Mirrors
+# _cleaning_jobs' shape exactly -- every assigned Bellhop Staffer not already
+# mid-Escort claims the next Room awaiting one (checking_in true,
+# escort_mode true, unclaimed) and works it down over their own Skill-scaled
+# delay, in parallel with any other assigned Bellhop -- see _tick_escorts().
+# A Room seated while every assigned Bellhop is already busy just sits
+# checking_in/escort_mode true with no entry here until one frees up; a Room
+# whose escort_mode is false is following the flat unstaffed
+# checkin_ticks_remaining countdown instead (_tick_checkins()) and is never
+# touched by this dict. Reassigning a Staffer away drops their own entry here
+# (see assign_staffer()) without resolving the Room -- it goes back to
+# waiting for the next free Bellhop, or falls back to the flat unstaffed
+# delay if none remain assigned (_fallback_unclaimed_escorts_to_unstaffed()).
+var _escort_jobs: Dictionary = {}
+
 # Terrace breakfast queue (ADR-0003): {id, guest_id, room_type_id,
 # instance_id, species_id, party_size} for every currently-occupied Room's
 # guest, rebuilt from scratch each Morning by _populate_breakfast_queue() --
@@ -155,6 +175,7 @@ func reset() -> void:
 	_next_day_forecast.clear()
 	_has_forecast = false
 	_cleaning_jobs.clear()
+	_escort_jobs.clear()
 	breakfast_queue.clear()
 	_next_breakfast_entry_id = 1
 	_breakfast_jobs.clear()
@@ -255,6 +276,7 @@ func assign_staffer(staffer_id: String, station_id: String) -> bool:
 ## mid-dinner stacked onto a breakfast entry).
 func _drop_staffer_jobs(staffer_id: String) -> void:
 	_cleaning_jobs.erase(staffer_id)
+	_escort_jobs.erase(staffer_id)
 	_breakfast_jobs.erase(staffer_id)
 	_dinner_jobs.erase(staffer_id)
 
@@ -263,6 +285,24 @@ func _drop_staffer_jobs(staffer_id: String) -> void:
 ## Returns {} if that Staffer isn't currently cleaning anything.
 func cleaning_job(staffer_id: String) -> Dictionary:
 	return _cleaning_jobs.get(staffer_id, {})
+
+
+## Read-only lookup of a Bellhop Staffer's in-flight Escort job, for UI/tests.
+## Returns {} if that Staffer isn't currently escorting anyone.
+func escort_job(staffer_id: String) -> Dictionary:
+	return _escort_jobs.get(staffer_id, {})
+
+
+## The Staffer id currently escorting the Room addressed by room_type_id +
+## instance_id, if any, mirroring cleaning_staffers() -- at most one entry,
+## since Escort isn't Stackable like Housekeeping/Kitchen Jobs are.
+func escort_staffers(room_type_id: String, instance_id: int) -> Array:
+	var key := MatchHint.room_key({"room_type_id": room_type_id, "instance_id": instance_id})
+	var out: Array = []
+	for staffer_id in _escort_jobs:
+		if MatchHint.room_key(_escort_jobs[staffer_id]) == key:
+			out.append(staffer_id)
+	return out
 
 
 ## Read-only lookup of a breakfast_queue entry by entry_id, for UI that needs
@@ -438,6 +478,7 @@ func _on_phase_changed(day: int, phase_name: String) -> void:
 func _on_tick_advanced(_day: int, _tick_in_day: int) -> void:
 	_tick_housekeeping()
 	_tick_checkins()
+	_tick_escorts()
 	_tick_breakfast()
 	_tick_dinner()
 	if _evening_active:
@@ -649,27 +690,108 @@ func _next_dirty_unclaimed_room() -> Dictionary:
 
 
 ## Bellhop coverage is evaluated once, at the moment of admission (mirrors
-## the reference prototype): a staffed Bellhop moves a guest straight in, an
-## unstaffed one leaves the Room "checking_in" for a flat data-driven delay
-## (stations.bellhop.unstaffed_checkin_delay_ticks). Presence-only, same as
-## Reception's Patience multiplier -- Skill doesn't modulate this.
+## the reference prototype's single evaluation point, even though the outcome
+## is now inverted per ADR-0014/0017): a staffed Bellhop leaves the Room
+## "checking_in" in escort_mode, to be worked down by _tick_escorts()'
+## per-Staffer Job claim; an unstaffed one leaves it "checking_in" for a flat
+## data-driven delay instead (stations.bellhop.unstaffed_checkin_delay_ticks,
+## unchanged from before -- presence-only, same as Reception's Patience
+## multiplier, Skill doesn't modulate this path).
 func _start_checkin(room: Dictionary) -> void:
-	if GameState.is_station_staffed("bellhop"):
-		room["checking_in"] = false
-		room["checkin_ticks_remaining"] = 0
-		return
 	room["checking_in"] = true
-	room["checkin_ticks_remaining"] = int(_station_balance("bellhop").get("unstaffed_checkin_delay_ticks", 0))
+	if GameState.is_station_staffed("bellhop"):
+		room["escort_mode"] = true
+		room["checkin_ticks_remaining"] = 0
+	else:
+		room["escort_mode"] = false
+		room["checkin_ticks_remaining"] = int(_station_balance("bellhop").get("unstaffed_checkin_delay_ticks", 0))
 
 
+## The flat unstaffed-Bellhop path only -- a Room in escort_mode is entirely
+## owned by _tick_escorts() instead, so it's skipped here even though it's
+## still "checking_in".
 func _tick_checkins() -> void:
 	for room in GameState.hotel_rooms:
-		if not room.get("checking_in", false):
+		if not room.get("checking_in", false) or room.get("escort_mode", false):
 			continue
 		room["checkin_ticks_remaining"] = int(room["checkin_ticks_remaining"]) - 1
 		if room["checkin_ticks_remaining"] <= 0:
 			room["checking_in"] = false
 			room["checkin_ticks_remaining"] = 0
+
+
+## Parallel per-Staffer Escort (ADR-0014/0017), mirroring _tick_housekeeping()'s
+## shape: every assigned Bellhop Staffer not already mid-Escort claims the
+## next Room awaiting one and works it down over a Skill-dependent tick count
+## (stations.bellhop.escort_ticks_by_skill). A Room seated while every
+## assigned Bellhop is already busy is simply left unclaimed -- still
+## checking_in/escort_mode true, not walked away -- until the claim loop below
+## picks it up on a later tick once a Bellhop frees up. If the last assigned
+## Bellhop is reassigned away entirely (GameState.is_station_staffed()
+## flips false) while Rooms are still waiting, they fall back to the flat
+## unstaffed delay rather than waiting forever -- see
+## _fallback_unclaimed_escorts_to_unstaffed().
+func _tick_escorts() -> void:
+	if not GameState.is_station_staffed("bellhop"):
+		_fallback_unclaimed_escorts_to_unstaffed()
+	else:
+		var escort_ticks_by_skill: Dictionary = _station_balance("bellhop").get("escort_ticks_by_skill", {})
+		var default_ticks: int = int(_station_balance("bellhop").get("default_escort_ticks", 0))
+
+		for staffer_id in GameState.station_staffers("bellhop"):
+			if _escort_jobs.has(staffer_id):
+				continue
+			var room := _next_room_awaiting_escort()
+			if room.is_empty():
+				continue
+			var skill: int = int(GameState.staffers[staffer_id]["skills"]["bellhop"])
+			var ticks: int = int(escort_ticks_by_skill.get(str(skill), default_ticks))
+			_escort_jobs[staffer_id] = {
+				"room_type_id": room["room_type_id"],
+				"instance_id": int(room["instance_id"]),
+				"ticks_remaining": ticks,
+			}
+
+	for staffer_id in _escort_jobs.keys().duplicate():
+		var job: Dictionary = _escort_jobs[staffer_id]
+		job["ticks_remaining"] = int(job["ticks_remaining"]) - 1
+		if job["ticks_remaining"] > 0:
+			continue
+		var room := GameState.room_instance(job["room_type_id"], job["instance_id"])
+		if not room.is_empty():
+			room["checking_in"] = false
+			room["escort_mode"] = false
+			room["checkin_ticks_remaining"] = 0
+		_escort_jobs.erase(staffer_id)
+
+
+## The first Room (in hotel_rooms order) still checking_in in escort_mode
+## that no in-flight Escort job is already targeting -- what a Bellhop
+## Staffer who just freed up claims next, mirroring
+## _next_dirty_unclaimed_room(). Returns {} if there's nothing left to claim.
+func _next_room_awaiting_escort() -> Dictionary:
+	var claimed: Dictionary = {}
+	for job in _escort_jobs.values():
+		claimed[MatchHint.room_key(job)] = true
+	for room in GameState.hotel_rooms:
+		if room.get("checking_in", false) and room.get("escort_mode", false) and not claimed.has(MatchHint.room_key(room)):
+			return room
+	return {}
+
+
+## Every still-waiting Room (checking_in/escort_mode true, unclaimed -- a
+## Room already mid-Escort has no way to reach here, since its claiming
+## Staffer being assigned is exactly what would keep the Station staffed)
+## converts to the flat unstaffed delay once the Bellhop Station has gone
+## fully unstaffed, starting fresh: no partial credit for ticks an Escort
+## would have taken, the same "no partial credit on interruption" rule
+## Housekeeping's abandoned-Room-stays-dirty behavior follows.
+func _fallback_unclaimed_escorts_to_unstaffed() -> void:
+	var delay: int = int(_station_balance("bellhop").get("unstaffed_checkin_delay_ticks", 0))
+	for room in GameState.hotel_rooms:
+		if room.get("checking_in", false) and room.get("escort_mode", false):
+			room["escort_mode"] = false
+			room["checkin_ticks_remaining"] = delay
 
 
 ## The Terrace's breakfast queue (ADR-0003): every currently-occupied Room's

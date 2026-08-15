@@ -52,7 +52,9 @@
       "unstaffed_patience_multiplier": 1.6
     },
     "bellhop": {
-      "unstaffed_checkin_delay_ticks": 16
+      "unstaffed_checkin_delay_ticks": 16,
+      "escort_ticks_by_skill": {"1": 20, "2": 16, "3": 12, "4": 9, "5": 6},
+      "default_escort_ticks": 16
     },
     "housekeeping": {
       "clean_ticks_by_skill": {"1": 40, "2": 32, "3": 26, "4": 20, "5": 16},

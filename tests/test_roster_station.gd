@@ -116,11 +116,14 @@ func test_empty_reception_station_measurably_increases_patience_decay() -> void:
 	assert_eq(_party_by_id(999)["patience"], START_PATIENCE - DECAY_PER_TICK - DECAY_PER_TICK * RECEPTION_UNSTAFFED_MULTIPLIER)
 
 
+## ADR-0014/0017 inverted this: a staffed Bellhop now Escorts (a Skill-scaled
+## per-Staffer Job, see test_bellhop_escort.gd) rather than seating instantly,
+## while the unstaffed case's flat delay is unchanged.
 func test_empty_bellhop_station_measurably_slows_check_in_versus_staffed() -> void:
 	_inject_party(1, ["warm", "water"], 1)
-	Sim.seat_party(1, "lagoon_room", 0) # Bellhop staffed (Marlon)
+	Sim.seat_party(1, "lagoon_room", 0) # Bellhop staffed (Marlon) -- an Escort, not instant
 	var staffed_room := GameState.room_instance("lagoon_room", 0)
-	assert_false(staffed_room["checking_in"], "a staffed Bellhop should move a guest straight in")
+	assert_true(staffed_room["checking_in"], "a staffed Bellhop should still Escort, not seat instantly")
 
 	Sim.assign_staffer("marlon", "kitchen") # empty Bellhop
 	_inject_party(2, ["warm", "water"], 1)
