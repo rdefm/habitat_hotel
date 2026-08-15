@@ -20,9 +20,42 @@ extends VBoxContainer
 ## Rows and cells are fully rebuilt on every refresh() rather than updated
 ## in place, since the set of visible Floors and built instances changes as
 ## the game progresses.
+##
+## Drag-and-drop (ticket 07, ADR-0009): each built-room cell is a
+## RoomCellButton, a second, coexisting way to reach seat_attempted --
+## dropping a Party card (ui/reception_panel.gd's PartyCardButton) resolves
+## the same Sim.match_hint() the tap flow uses and, on a real match, emits
+## seat_attempted exactly like _on_cell_pressed does, so main_screen's
+## _on_seat_attempted handles both gestures identically without knowing
+## which one fired. Unlike the tap flow, the dragged party_id doesn't come
+## from selected_party_id -- it travels in the drag payload -- so a drop
+## works regardless of Reception's current tap-selection. _can_drop_data
+## does the real Build-Slot/none-match rejection (not just a type check) so
+## that Godot's own drag-success bookkeeping -- which the dragged card reads
+## via gui_is_drag_successful() -- reflects a genuine accept/reject rather
+## than "some control caught it".
 
 signal slot_selected(room_type_id: String, instance_id: int)
 signal seat_attempted(party_id: int, room_type_id: String, instance_id: int, hint: String)
+
+class RoomCellButton extends Button:
+	signal drop_attempted(party_id: int, room_type_id: String, instance_id: int, hint: String)
+
+	var room_type_id: String = ""
+	var instance_id: int = -1
+
+	func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
+		if typeof(data) != TYPE_DICTIONARY or data.get("type") != "party":
+			return false
+		if disabled or instance_id == -1: # a Build Slot is never a seating target
+			return false
+		var hint: String = Sim.match_hint(int(data["party_id"]), room_type_id, instance_id)
+		return hint != "none"
+
+	func _drop_data(_at_position: Vector2, data: Variant) -> void:
+		var party_id: int = int(data["party_id"])
+		var hint: String = Sim.match_hint(party_id, room_type_id, instance_id)
+		drop_attempted.emit(party_id, room_type_id, instance_id, hint)
 
 const CELL_MIN_SIZE := Vector2(110, 88)
 const ROW_MIN_HEIGHT := 112
@@ -91,11 +124,14 @@ func _make_floor_row(room_type_id: String) -> Control:
 
 
 func _make_cell(room_type_id: String, room_type: Dictionary, instance_id: int, room: Dictionary) -> Button:
-	var btn := Button.new()
+	var btn := RoomCellButton.new()
+	btn.room_type_id = room_type_id
+	btn.instance_id = instance_id
 	btn.custom_minimum_size = CELL_MIN_SIZE
 	btn.toggle_mode = false
 	btn.clip_text = true
 	btn.pressed.connect(_on_cell_pressed.bind(room_type_id, instance_id))
+	btn.drop_attempted.connect(_on_cell_dropped)
 
 	if room.is_empty():
 		btn.text = "%s\n(build)" % room_type["name"]
@@ -148,3 +184,7 @@ func _on_cell_pressed(room_type_id: String, instance_id: int) -> void:
 		seat_attempted.emit(selected_party_id, room_type_id, instance_id, hint)
 		return
 	slot_selected.emit(room_type_id, instance_id)
+
+
+func _on_cell_dropped(party_id: int, room_type_id: String, instance_id: int, hint: String) -> void:
+	seat_attempted.emit(party_id, room_type_id, instance_id, hint)

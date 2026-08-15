@@ -26,8 +26,47 @@ extends VBoxContainer
 ## sticks onto the Party dict across a split-across-Rooms seating (see its
 ## doc comment), so re-selecting a partially-seated Party's remainder here
 ## reflects that it's already opted in instead of silently forgetting it.
+##
+## Drag-and-drop (ticket 07, ADR-0009): each card is a PartyCardButton, which
+## coexists with the tap-select flow above rather than replacing it -- a
+## plain click still fires `pressed` (Godot only starts a drag once the
+## pointer moves past its threshold, so click and drag never both fire for
+## one gesture). Dropping on a Room is validated and actioned entirely by
+## HotelPanel's RoomCellButton against the dragged party_id, independent of
+## _selected_party_id; this panel only needs to hand out that id and react
+## if the drop is rejected.
 
 const PatienceState = preload("res://sim/patience_state.gd")
+
+## Drag source for a Reception card. _can_drop_data/_drop_data live on
+## HotelPanel's RoomCellButton (ui/hotel_panel.gd), which does the real
+## Sim.match_hint() validation -- so gui_is_drag_successful() here already
+## reflects a real rejection (Build Slot / none-match / dropped outside the
+## grid alike), not just "some control happened to catch it". _dragging
+## guards against reacting to a notification meant for an unrelated drag.
+class PartyCardButton extends Button:
+	var party_id: int = -1
+	var _dragging: bool = false
+
+	func _get_drag_data(_at_position: Vector2) -> Variant:
+		_dragging = true
+		var preview := Label.new()
+		preview.text = text
+		preview.modulate = modulate
+		set_drag_preview(preview)
+		return {"type": "party", "party_id": party_id}
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_DRAG_END and _dragging:
+			_dragging = false
+			if not get_viewport().gui_is_drag_successful():
+				_flash_rejected()
+
+	func _flash_rejected() -> void:
+		var base := modulate
+		var tween := create_tween()
+		tween.tween_property(self, "modulate", Color(1.0, 0.3, 0.3), 0.1)
+		tween.tween_property(self, "modulate", base, 0.2)
 
 signal party_selected(party_id: int)
 
@@ -100,7 +139,8 @@ func _make_card(party: Dictionary) -> Button:
 	var tier := PatienceState.tier(float(party["patience"]), GameState.balance["patience"])
 	var selected := party_id == _selected_party_id
 
-	var btn := Button.new()
+	var btn := PartyCardButton.new()
+	btn.party_id = party_id
 	btn.custom_minimum_size = CARD_MIN_SIZE
 	btn.clip_text = true
 	btn.text = "%s%s\n%d guest(s)\n%s" % [

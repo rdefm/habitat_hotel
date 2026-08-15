@@ -255,7 +255,14 @@ func _on_party_selected(party_id: int) -> void:
 
 
 func _on_seat_attempted(party_id: int, room_type_id: String, instance_id: int, hint: String) -> void:
-	var dinner_addon := _reception_panel.dinner_addon_selected
+	## Ticket 07 (ADR-0009): a drop can target a Party that isn't the
+	## tap-selected one -- _reception_panel.dinner_addon_selected only
+	## reflects that selection's checkbox, so it's only correct here when
+	## party_id actually is the tap-selected Party. Otherwise fall back to
+	## the Party's own persisted opt-in (same seeding reception_panel.gd's
+	## _on_card_pressed already does), since a dragged Party never had a
+	## checkbox of its own to toggle.
+	var dinner_addon := _reception_panel.dinner_addon_selected if party_id == _hotel_panel.selected_party_id else bool(Sim.pending_party(party_id).get("dinner_addon", false))
 	if hint == "green":
 		Sim.seat_party(party_id, room_type_id, instance_id, dinner_addon)
 		_finish_seating_flow()
