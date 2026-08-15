@@ -17,9 +17,18 @@ extends VBoxContainer
 ## Opened by tapping the Terrace structure (main_screen._on_terrace_tapped
 ## -> open_menu()), which pauses the Clock like every other generic-overlay
 ## menu -- so this view doesn't need its own tick_advanced refresh wiring.
+##
+## Tapping the Kitchen Staffer row still toggles selection for the tap-
+## Station-to-assign gesture, and now also emits staffer_tapped so
+## main_screen can layer the bespoke detail popup (ticket 06, ADR-0011) on
+## top of this modal via PopupHost.
 
 const StafferCard = preload("res://ui/staffer_card.gd")
 const StationCard = preload("res://ui/station_card.gd")
+
+## Emitted whenever a Staffer card is tapped, selected or not, so
+## main_screen can open their detail popup.
+signal staffer_tapped(staffer_id: String)
 
 var _selected_staffer_id: String = ""
 
@@ -101,6 +110,7 @@ func _refresh_kitchen() -> void:
 func _on_staffer_pressed(staffer_id: String) -> void:
 	_selected_staffer_id = "" if _selected_staffer_id == staffer_id else staffer_id
 	_refresh_kitchen()
+	staffer_tapped.emit(staffer_id)
 
 
 func _on_assigned() -> void:

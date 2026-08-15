@@ -15,11 +15,20 @@ extends VBoxContainer
 ## Kitchen (re)assignment made there (still routed through Sim.assign_staffer())
 ## can move a Staffer off one of these three Stations without this panel's
 ## own taps ever firing.
+##
+## Tapping a Staffer card still toggles selection for the tap-Station-to-
+## assign gesture above, and now also emits staffer_tapped so main_screen can
+## open the bespoke detail popup (ticket 06, ADR-0011) -- replacing the
+## retired ui/roster_menu.gd as the place to see a Staffer's Skill/Traits.
 
 const StafferCard = preload("res://ui/staffer_card.gd")
 const StationCard = preload("res://ui/station_card.gd")
 
 const STATION_IDS := ["reception", "bellhop", "housekeeping"]
+
+## Emitted whenever a Staffer card is tapped, selected or not, so
+## main_screen can open their detail popup.
+signal staffer_tapped(staffer_id: String)
 
 var _selected_staffer_id: String = ""
 
@@ -70,6 +79,7 @@ func refresh() -> void:
 func _on_staffer_pressed(staffer_id: String) -> void:
 	_selected_staffer_id = "" if _selected_staffer_id == staffer_id else staffer_id
 	refresh()
+	staffer_tapped.emit(staffer_id)
 
 
 func _on_assigned() -> void:

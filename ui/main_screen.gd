@@ -14,9 +14,9 @@ const PopupHost = preload("res://ui/popup_host.gd")
 const SeatConfirmMenu = preload("res://ui/seat_confirm_menu.gd")
 const StayInfoMenu = preload("res://ui/stay_info_menu.gd")
 const BuildConfirmMenu = preload("res://ui/build_confirm_menu.gd")
+const StafferDetailMenu = preload("res://ui/staffer_detail_menu.gd")
 const PricesMenu = preload("res://ui/prices_menu.gd")
 const HireMenu = preload("res://ui/hire_menu.gd")
-const RosterMenu = preload("res://ui/roster_menu.gd")
 const ReportsMenu = preload("res://ui/reports_menu.gd")
 const ReviewsMenu = preload("res://ui/reviews_menu.gd")
 const UpgradeMenu = preload("res://ui/upgrade_menu.gd")
@@ -65,6 +65,7 @@ func _ready() -> void:
 	root.add_child(_reception_panel)
 
 	_station_panel = StationPanel.new()
+	_station_panel.staffer_tapped.connect(_on_staffer_tapped)
 	root.add_child(_station_panel)
 
 	_terrace_panel = TerracePanel.new()
@@ -165,7 +166,6 @@ func _build_menu_bar() -> HBoxContainer:
 	var entries := [
 		["Prices", func(): return PricesMenu.new()],
 		["Hire", func(): return HireMenu.new()],
-		["Roster", func(): return RosterMenu.new()],
 		["Reports", func(): return ReportsMenu.new()],
 		["Reviews", func(): return ReviewsMenu.new()],
 	]
@@ -213,7 +213,30 @@ func _on_hotel_slot_selected(room_type_id: String, instance_id: int) -> void:
 ## --- Terrace (ticket 05, ADR-0010: always-visible structure, tap for the modal) ---
 
 func _on_terrace_tapped() -> void:
-	open_menu("Terrace", TerraceMenu.new())
+	var menu := TerraceMenu.new()
+	menu.staffer_tapped.connect(_on_staffer_tapped)
+	open_menu("Terrace", menu)
+
+
+## --- Staffer detail popup (ticket 06, ADR-0011: replaces the retired
+## ui/roster_menu.gd as the place to see a Staffer's Skill/Traits/current
+## assignment) -- fired by _station_panel and any open TerraceMenu whenever
+## a Staffer card is tapped there. Layers on top of whatever's already
+## showing via PopupHost, which renders after (and so on top of) the
+## generic overlay. PopupHost.close_popup() unconditionally resumes the
+## Clock, which would wrongly un-pause a still-open TerraceMenu underneath
+## (the Kitchen-slot case) -- so re-pause it here if the generic overlay is
+## still visible.
+
+func _on_staffer_tapped(staffer_id: String) -> void:
+	var detail := StafferDetailMenu.new()
+	detail.staffer_id = staffer_id
+	detail.closed.connect(func():
+		_popup_host.close_popup()
+		if _overlay.visible:
+			Clock.set_paused(true)
+	)
+	_popup_host.open_popup(detail)
 
 
 func _open_upgrade_menu(room_type_id: String, instance_id: int) -> void:

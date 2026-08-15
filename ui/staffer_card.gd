@@ -5,8 +5,9 @@ extends RefCounted
 ## Staffer's per-Station Skill summary and current Station, highlighted
 ## while selected. Tapping calls on_pressed(staffer_id) so the caller (which
 ## owns the "which Staffer is selected" state) can toggle selection and
-## refresh. Shared by ui/station_panel.gd, ui/terrace_menu.gd, and
-## ui/roster_menu.gd (the latter renders it disabled, read-only).
+## refresh. Shared by ui/station_panel.gd and ui/terrace_menu.gd, both of
+## which also emit their own staffer_tapped signal off the same tap so
+## main_screen can open the bespoke detail popup (ticket 06, ADR-0011).
 
 const Station = preload("res://sim/station.gd")
 
