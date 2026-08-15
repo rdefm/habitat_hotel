@@ -1,0 +1,7 @@
+# Bellhop Escort implementation: parallel per-Staffer, queued overflow
+
+ADR-0014 accepted the Escort concept but today's code (`SimController._start_checkin()`) still has the opposite behavior: a staffed Bellhop seats a Party instantly, and only the unstaffed case gets a delay (`stations.bellhop.unstaffed_checkin_delay_ticks`, flat, presence-only). We're implementing ADR-0014 for real, now that [[0016-spatial-building-cross-section-ui]] gives the Escort a real Room to walk the Party to: a staffed Bellhop's case is inverted to a Skill-scaled Escort delay (a new `stations.bellhop.escort_ticks_by_skill` table, shaped like `stations.housekeeping.clean_ticks_by_skill`) before the Room occupies. The unstaffed case's existing flat delay is unchanged.
+
+Concurrency mirrors Housekeeping's per-Staffer Job model (ADR-0008) rather than Bellhop's previous presence-only check: every assigned Bellhop Staffer not already mid-Escort claims the next Party waiting to be escorted and works it down over their own Skill-scaled delay, in parallel with any other assigned Bellhop. A Party seated while every currently-assigned Bellhop is already busy does not fall back to the flat unstaffed delay — it waits in a queue for the next Bellhop to free up, since a Bellhop Station that's staffed-but-saturated is a different, better case than one that's genuinely unstaffed.
+
+Status: accepted, implements ADR-0014.
