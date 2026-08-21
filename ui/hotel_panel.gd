@@ -7,6 +7,13 @@ extends VBoxContainer
 ## all. A Floor's row holds one cell per built instance plus a trailing
 ## Build Slot cell (instance_id -1) while it's still under its instance cap.
 ##
+## Floor rows are added highest-unlock-star first (ties broken by id) --
+## see _floor_sort_descending. ui/hotel_view.gd (ticket 02, ADR-0016) stacks
+## this whole panel above Terrace/Reception, so this panel's own
+## top-to-bottom order is what makes the *building's* bottom-to-top order
+## read as ascending star, replacing the old flat alphabetical
+## room_type_ids.sort().
+##
 ## Two tap modes, switched by whether a Party is selected at Reception
 ## (ADR-0001, ticket 05): with no selected_party_id, tapping an
 ## empty/unlocked cell opens Build and tapping a built room opens Upgrade,
@@ -102,12 +109,21 @@ func refresh() -> void:
 	for child in get_children():
 		child.queue_free()
 
-	var room_type_ids := GameState.rooms.keys()
-	room_type_ids.sort()
+	var room_type_ids: Array = []
+	for room_type_id in GameState.rooms.keys():
+		if GameState.can_build_room_type(room_type_id):
+			room_type_ids.append(room_type_id)
+	room_type_ids.sort_custom(_floor_sort_descending)
 	for room_type_id in room_type_ids:
-		if not GameState.can_build_room_type(room_type_id):
-			continue
 		add_child(_make_floor_row(room_type_id))
+
+
+func _floor_sort_descending(a: String, b: String) -> bool:
+	var star_a: int = int(GameState.rooms[a]["unlock"]["star"])
+	var star_b: int = int(GameState.rooms[b]["unlock"]["star"])
+	if star_a != star_b:
+		return star_a > star_b
+	return a < b
 
 
 func _make_floor_row(room_type_id: String) -> Control:

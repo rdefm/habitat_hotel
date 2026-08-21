@@ -6,6 +6,7 @@ extends Control
 ## surface -- everything here reads from/writes to GameState via its public
 ## API, never touching Sim internals directly.
 
+const HotelView = preload("res://ui/hotel_view.gd")
 const HotelPanel = preload("res://ui/hotel_panel.gd")
 const ReceptionPanel = preload("res://ui/reception_panel.gd")
 const StationPanel = preload("res://ui/station_panel.gd")
@@ -60,29 +61,22 @@ func _ready() -> void:
 	root.add_child(_build_menu_bar())
 	root.add_child(LobbyView.new())
 
-	_reception_panel = ReceptionPanel.new()
-	_reception_panel.party_selected.connect(_on_party_selected)
-	root.add_child(_reception_panel)
+	var hotel_view := HotelView.new()
+	hotel_view.interactive = true
+	root.add_child(hotel_view)
 
-	_station_panel = StationPanel.new()
-	_station_panel.staffer_tapped.connect(_on_staffer_tapped)
-	root.add_child(_station_panel)
-
-	_terrace_panel = TerracePanel.new()
-	_terrace_panel.terrace_tapped.connect(_on_terrace_tapped)
-	root.add_child(_terrace_panel)
-
-	var middle := HBoxContainer.new()
-	middle.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_child(middle)
-
-	_hotel_panel = HotelPanel.new()
-	_hotel_panel.interactive = true
-	_hotel_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_hotel_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_hotel_panel = hotel_view.hotel_panel
 	_hotel_panel.slot_selected.connect(_on_hotel_slot_selected)
 	_hotel_panel.seat_attempted.connect(_on_seat_attempted)
-	middle.add_child(_hotel_panel)
+
+	_terrace_panel = hotel_view.terrace_panel
+	_terrace_panel.terrace_tapped.connect(_on_terrace_tapped)
+
+	_reception_panel = hotel_view.reception_panel
+	_reception_panel.party_selected.connect(_on_party_selected)
+
+	_station_panel = hotel_view.station_panel
+	_station_panel.staffer_tapped.connect(_on_staffer_tapped)
 
 	root.add_child(_build_day_log())
 
