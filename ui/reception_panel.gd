@@ -35,8 +35,21 @@ extends VBoxContainer
 ## HotelPanel's RoomCellButton against the dragged party_id, independent of
 ## _selected_party_id; this panel only needs to hand out that id and react
 ## if the drop is rejected.
+##
+## Actor reskin (ticket 03, ADR-0016): PartyCardButton itself, its drag
+## payload/reject-flash, and every signal/selection flow above are
+## unchanged -- only _make_actor()'s visuals shrink from a wide multi-line
+## info card to a narrow standing token (patience-tier color as the body,
+## a short caption) so the row reads as a queue of waiting characters. Full
+## detail that used to live in the card text now lives in tooltip_text
+## instead. ui/actor_style.gd (shared with ui/station_panel.gd's Staffer
+## tokens) strips the engine's default bevelled Button chrome down to a
+## flat, rounded shape so the tier-tinted token reads as a standing
+## character rather than a UI button, per ADR-0015/0016's "plain colored
+## shapes" actors.
 
 const PatienceState = preload("res://sim/patience_state.gd")
+const ActorStyle = preload("res://ui/actor_style.gd")
 
 ## Drag source for a Reception card. _can_drop_data/_drop_data live on
 ## HotelPanel's RoomCellButton (ui/hotel_panel.gd), which does the real
@@ -70,7 +83,7 @@ class PartyCardButton extends Button:
 
 signal party_selected(party_id: int)
 
-const CARD_MIN_SIZE := Vector2(150, 64)
+const ACTOR_MIN_SIZE := Vector2(44, 64)
 
 const TIER_COLOR := {
 	"calm": Color(0.85, 0.95, 1.0),
@@ -116,39 +129,48 @@ func refresh() -> void:
 		return
 
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, CARD_MIN_SIZE.y + 8)
+	scroll.custom_minimum_size = Vector2(0, ACTOR_MIN_SIZE.y + 8)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	add_child(scroll)
 
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
+	row.add_theme_constant_override("separation", 2)
 	scroll.add_child(row)
 
 	for party in Sim.pending_arrivals:
-		row.add_child(_make_card(party))
+		row.add_child(_make_actor(party))
 
 	if _selected_party_id != -1:
 		add_child(_make_dinner_addon_check())
 
 
-func _make_card(party: Dictionary) -> Button:
+func _make_actor(party: Dictionary) -> Button:
 	var party_id := int(party["id"])
 	var species_id: String = party["species_id"]
 	var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
+	var party_size := int(party["party_size"])
 	var tier := PatienceState.tier(float(party["patience"]), GameState.balance["patience"])
 	var selected := party_id == _selected_party_id
 
+	var caption := species_name.left(3)
+	if party_size > 1:
+		caption += "\n×%d" % party_size
+
 	var btn := PartyCardButton.new()
 	btn.party_id = party_id
-	btn.custom_minimum_size = CARD_MIN_SIZE
+	btn.custom_minimum_size = ACTOR_MIN_SIZE
 	btn.clip_text = true
-	btn.text = "%s%s\n%d guest(s)\n%s" % [
-		"» " if selected else "", species_name, int(party["party_size"]), tier.capitalize(),
-	]
+	btn.text = "»\n%s" % caption if selected else caption
+	btn.add_theme_stylebox_override("normal", ActorStyle.flat_box())
+	btn.add_theme_stylebox_override("hover", ActorStyle.flat_box())
+	btn.add_theme_stylebox_override("pressed", ActorStyle.flat_box())
+	btn.add_theme_stylebox_override("focus", ActorStyle.flat_box())
 	var color: Color = TIER_COLOR[tier]
 	btn.modulate = color.lightened(0.3) if selected else color
-	btn.tooltip_text = "%s the %s -- needs %s" % [party["name"], species_name, String(", ").join(party["needs"])]
+	btn.tooltip_text = "%s the %s -- %d guest(s), %s, needs %s" % [
+		party["name"], species_name, party_size, tier.capitalize(), String(", ").join(party["needs"]),
+	]
 	btn.pressed.connect(_on_card_pressed.bind(party_id))
 	return btn
 

@@ -54,21 +54,31 @@ class StafferCardButton extends Button:
 		tween.tween_property(self, "modulate", base, 0.2)
 
 
-static func make_button(staffer_id: String, selected: bool, on_pressed: Callable) -> Button:
-	var staffer: Dictionary = GameState.staffers[staffer_id]
-	var skills: Dictionary = staffer["skills"]
-	var current_station := GameState.staffer_station(staffer_id)
-	var current_label: String = Station.LABELS.get(current_station, "(unassigned)")
-	var skill_summary := "R%d B%d H%d K%d" % [
+## Shared by this file's own make_button() and ui/station_panel.gd's
+## compact actor tokens, so both stay in lockstep on the same "R#B#H#K#" and
+## "(unassigned)" text instead of each keeping its own copy that can drift.
+static func skill_summary(staffer_id: String) -> String:
+	var skills: Dictionary = GameState.staffers[staffer_id]["skills"]
+	return "R%d B%d H%d K%d" % [
 		int(skills["reception"]), int(skills["bellhop"]), int(skills["housekeeping"]), int(skills["kitchen"]),
 	]
+
+
+static func current_label(staffer_id: String) -> String:
+	return Station.LABELS.get(GameState.staffer_station(staffer_id), "(unassigned)")
+
+
+static func make_button(staffer_id: String, selected: bool, on_pressed: Callable) -> Button:
+	var staffer: Dictionary = GameState.staffers[staffer_id]
+	var summary := skill_summary(staffer_id)
+	var label := current_label(staffer_id)
 
 	var btn := StafferCardButton.new()
 	btn.staffer_id = staffer_id
 	btn.custom_minimum_size = MIN_SIZE
 	btn.clip_text = true
-	btn.text = "%s%s\n%s\n%s" % ["» " if selected else "", staffer["name"], skill_summary, current_label]
+	btn.text = "%s%s\n%s\n%s" % ["» " if selected else "", staffer["name"], summary, label]
 	btn.modulate = Color(1.0, 1.0, 0.6) if selected else Color(1, 1, 1)
-	btn.tooltip_text = "%s -- %s -- currently %s" % [staffer["name"], skill_summary, current_label]
+	btn.tooltip_text = "%s -- %s -- currently %s" % [staffer["name"], summary, label]
 	btn.pressed.connect(on_pressed.bind(staffer_id))
 	return btn
