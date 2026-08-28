@@ -226,3 +226,25 @@ func _on_cell_dropped(party_id: int, room_type_id: String, instance_id: int, hin
 
 func _on_cell_staffer_dropped(staffer_id: String, room_type_id: String, instance_id: int) -> void:
 	Sim.stack_staffer_on_room(staffer_id, room_type_id, instance_id)
+
+
+## Locates the currently-built RoomCellButton for room_type_id + instance_id
+## anywhere in this panel's tree, for ui/room_occupancy_layer.gd's walk-in/
+## persistent-occupant overlay (ticket 04) to read a live screen position
+## from. Cells are fully rebuilt on every refresh() (see this file's class
+## doc), so that overlay re-resolves this fresh every frame/tick rather than
+## caching a Control reference refresh() could free out from under it.
+## Returns null if that Room isn't currently rendered (e.g. mid-rebuild, or
+## the instance doesn't exist).
+func find_room_cell(room_type_id: String, instance_id: int) -> Control:
+	return _find_room_cell(self, room_type_id, instance_id)
+
+
+func _find_room_cell(node: Node, room_type_id: String, instance_id: int) -> Control:
+	for child in node.get_children():
+		if child is RoomCellButton and child.room_type_id == room_type_id and child.instance_id == instance_id:
+			return child
+		var found := _find_room_cell(child, room_type_id, instance_id)
+		if found != null:
+			return found
+	return null

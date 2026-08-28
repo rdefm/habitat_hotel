@@ -23,6 +23,7 @@ const ReviewsMenu = preload("res://ui/reviews_menu.gd")
 const UpgradeMenu = preload("res://ui/upgrade_menu.gd")
 const TerraceMenu = preload("res://ui/terrace_menu.gd")
 const LobbyView = preload("res://ui/lobby_view.gd")
+const RoomOccupancyLayer = preload("res://ui/room_occupancy_layer.gd")
 const DemandFormat = preload("res://ui/demand_format.gd")
 
 const DAY_LOG_MAX_LINES := 200
@@ -47,6 +48,7 @@ var _popup_host: PopupHost
 var _hotel_panel: HotelPanel
 var _reception_panel: ReceptionPanel
 var _station_panel: StationPanel
+var _room_occupancy_layer: RoomOccupancyLayer
 var _terrace_panel: TerracePanel
 
 
@@ -77,6 +79,17 @@ func _ready() -> void:
 
 	_station_panel = hotel_view.station_panel
 	_station_panel.staffer_tapped.connect(_on_staffer_tapped)
+
+	## Screen-space overlay for the walk-in/persistent-occupant actors
+	## (ticket 04, ADR-0016) -- a sibling of root rather than a child of it,
+	## so it draws on top of every floor without taking a row in root's own
+	## vertical layout; mouse_filter IGNORE (set in its own _ready()) keeps
+	## it from ever intercepting a tap/drag meant for a RoomCellButton
+	## beneath it.
+	_room_occupancy_layer = RoomOccupancyLayer.new()
+	_room_occupancy_layer.hotel_panel = _hotel_panel
+	_room_occupancy_layer.reception_panel = _reception_panel
+	add_child(_room_occupancy_layer)
 
 	root.add_child(_build_day_log())
 
