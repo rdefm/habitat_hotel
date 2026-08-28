@@ -2,41 +2,36 @@ class_name LobbyView
 extends Control
 
 ## Placeholder lobby visualization. Purely decorative: reacts to EventBus's
-## guest_turned_away/guest_checked_out/room_marked_dirty signals by tweening
-## simple colored boxes across a fixed strip (entrance -> reception ->
-## elevator). Never reads or writes sim state, only GameState.species for
-## display names -- same as the other UI files.
+## room_marked_dirty signal by tweening a simple colored-box housekeeper
+## across a fixed strip (reception -> elevator -> reception). Never reads or
+## writes sim state, only GameState.species for display names -- same as the
+## other UI files.
 ##
-## guest_seated is no longer handled here (ticket 04, ADR-0016): a seated
-## guest's real point-to-point walk from Reception to their actual Room cell,
-## with a real Bellhop actor accompanying a staffed Escort, now lives in
-## ui/room_occupancy_layer.gd -- this file's old "into the elevator" fade
-## plus its decorative, disconnected bellhop round-trip were exactly the
-## abstracted stand-in that ticket replaces.
+## guest_seated (ticket 04) and guest_turned_away/guest_checked_out (ticket
+## 05, ADR-0016) are no longer handled here: a seated guest's real walk from
+## Reception to their Room, a turned-away guest's real walk out from its
+## actual Reception queue position, and a checking-out guest's real walk
+## down from their Room, all now live in ui/room_occupancy_layer.gd -- this
+## file's old fixed entrance/reception/elevator stand-in trips (plus its
+## decorative, disconnected bellhop round-trip) were exactly the abstracted
+## stand-ins those tickets replace.
 ##
-## Guests turned away: entrance -> reception -> back out.
-## Checkouts: elevator -> reception -> back out.
 ## A housekeeper makes a reception -> elevator -> reception trip whenever a
 ## room is checked out and marked dirty, standing in for "went and cleaned
 ## that room"; between trips it idles near reception. (Ticket 09 will give
 ## this the same real-target treatment ticket 04 gave the guest walk-in.)
 ##
-## The sim resolves a whole phase's worth of arrivals/checkouts in one
-## instant (see autoload/sim_controller.gd); rather than playing every
-## resulting animation at once, incoming events are queued and drip-fed one
-## at a time so a busy phase still reads as a trickle of activity instead of
-## a single dump. This is purely a presentation choice -- the sim's timing
-## and results are unaffected.
+## The sim can mark several rooms dirty in one instant (a busy checkout
+## phase); rather than playing every resulting trip at once, incoming events
+## are queued and drip-fed one at a time so a busy phase still reads as a
+## trickle of activity instead of a single dump. This is purely a
+## presentation choice -- the sim's timing and results are unaffected.
 
 const STRIP_SIZE := Vector2(700, 110)
-const ENTRANCE_X := 20.0
 const RECEPTION_X := 300.0
 const ELEVATOR_X := 620.0
-const OFFSCREEN_X := -40.0
-const ACTOR_Y := 55.0
-const HOUSEKEEPER_Y := ACTOR_Y + 28.0
+const HOUSEKEEPER_Y := 83.0
 const LEG_DURATION := 0.9
-const PAUSE_DURATION := 0.4
 
 ## Bounds on how far apart queued events are staggered: never faster than
 ## MIN (so a big batch doesn't blur together) nor slower than MAX (so a
@@ -65,7 +60,6 @@ func _ready() -> void:
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
-	_add_marker("Entrance", ENTRANCE_X, Color(0.3, 0.3, 0.3))
 	_add_marker("Reception", RECEPTION_X, Color(0.25, 0.35, 0.55))
 	_add_marker("Elevator", ELEVATOR_X, Color(0.3, 0.3, 0.3))
 	_add_marker("Receptionist", RECEPTION_X, Color(0.45, 0.35, 0.55), 30.0)
@@ -85,8 +79,6 @@ func _ready() -> void:
 	_dequeue_timer.timeout.connect(_on_dequeue_timer_timeout)
 	add_child(_dequeue_timer)
 
-	EventBus.guest_turned_away.connect(_on_guest_turned_away)
-	EventBus.guest_checked_out.connect(_on_guest_checked_out)
 	EventBus.room_marked_dirty.connect(_on_room_marked_dirty)
 	EventBus.clock_paused_changed.connect(_on_clock_paused_changed)
 
@@ -115,23 +107,7 @@ func _make_actor(text: String, color: Color) -> PanelContainer:
 	return panel
 
 
-func _short_name(guest_name: String) -> String:
-	return guest_name if guest_name.length() <= 12 else guest_name.substr(0, 11) + "."
-
-
-func _species_name(species_id: String) -> String:
-	return GameState.species.get(species_id, {}).get("name", species_id)
-
-
 ## --- Event queue: signals only enqueue; _play_* does the actual animating ---
-
-func _on_guest_turned_away(guest_name: String, species_id: String, reason: String) -> void:
-	_enqueue({"kind": "turned_away", "guest_name": guest_name, "species_id": species_id, "reason": reason})
-
-
-func _on_guest_checked_out(guest_name: String, species_id: String, room_type_id: String, instance_id: int) -> void:
-	_enqueue({"kind": "checked_out", "guest_name": guest_name, "species_id": species_id, "room_type_id": room_type_id, "instance_id": instance_id})
-
 
 func _on_room_marked_dirty(room_type_id: String, instance_id: int) -> void:
 	_enqueue({"kind": "dirty", "room_type_id": room_type_id, "instance_id": instance_id})
@@ -184,41 +160,11 @@ func _ticks_remaining_in_phase() -> int:
 
 func _play_entry(entry: Dictionary) -> void:
 	match entry["kind"]:
-		"turned_away":
-			_play_guest_turned_away(entry["guest_name"], entry["species_id"], entry["reason"])
-		"checked_out":
-			_play_guest_checked_out(entry["guest_name"], entry["species_id"], entry["room_type_id"], entry["instance_id"])
 		"dirty":
 			_play_room_dirty(entry["room_type_id"], entry["instance_id"])
 
 
 ## --- Playback (each runs exactly once per dequeued event) ---
-
-func _play_guest_turned_away(guest_name: String, species_id: String, reason: String) -> void:
-	var guest := _make_actor(_short_name(guest_name), Color(0.55, 0.2, 0.2))
-	guest.tooltip_text = "%s the %s -- turned away (%s)" % [guest_name, _species_name(species_id), reason]
-	guest.position = Vector2(ENTRANCE_X, ACTOR_Y)
-	add_child(guest)
-
-	var tween := create_tween()
-	tween.tween_property(guest, "position:x", RECEPTION_X, LEG_DURATION)
-	tween.tween_interval(PAUSE_DURATION)
-	tween.tween_property(guest, "position:x", OFFSCREEN_X, LEG_DURATION)
-	tween.tween_callback(guest.queue_free)
-
-
-func _play_guest_checked_out(guest_name: String, species_id: String, _room_type_id: String, _instance_id: int) -> void:
-	var guest := _make_actor(_short_name(guest_name), Color(0.4, 0.4, 0.5))
-	guest.tooltip_text = "%s the %s -- checking out" % [guest_name, _species_name(species_id)]
-	guest.position = Vector2(ELEVATOR_X, ACTOR_Y)
-	add_child(guest)
-
-	var tween := create_tween()
-	tween.tween_property(guest, "position:x", RECEPTION_X, LEG_DURATION)
-	tween.tween_interval(PAUSE_DURATION)
-	tween.tween_property(guest, "position:x", OFFSCREEN_X, LEG_DURATION)
-	tween.tween_callback(guest.queue_free)
-
 
 func _play_room_dirty(_room_type_id: String, _instance_id: int) -> void:
 	_send_housekeeper()
@@ -240,10 +186,10 @@ func _send_housekeeper() -> void:
 
 
 ## Ambient "tidying up reception" flavor for whenever the housekeeper isn't
-## off on a cleaning trip -- this view is only an abstract strip (Entrance/
-## Reception/Elevator), not a real hotel map, so "wanders around fixing
-## things" is represented as a small idle bounce in place rather than actual
-## pathing to arbitrary spots.
+## off on a cleaning trip -- this view is only an abstract strip (Reception/
+## Elevator), not a real hotel map, so "wanders around fixing things" is
+## represented as a small idle bounce in place rather than actual pathing to
+## arbitrary spots.
 func _on_housekeeper_idle_tick() -> void:
 	if _housekeeper_tween != null and _housekeeper_tween.is_valid():
 		return

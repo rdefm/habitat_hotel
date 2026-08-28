@@ -598,7 +598,7 @@ func _walk_away(party: Dictionary) -> void:
 			# service failure, so this doesn't cost reputation either.
 			_day_metrics["walked_away_too_expensive"] += 1
 	_track_turned_away(party)
-	EventBus.guest_turned_away.emit(party["name"], party["species_id"], reason)
+	EventBus.guest_turned_away.emit(party["name"], party["species_id"], reason, int(party["id"]))
 
 
 func _track_turned_away(party: Dictionary) -> void:

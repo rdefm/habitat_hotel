@@ -66,7 +66,7 @@ func test_a_partys_patience_expiring_removes_it_from_the_queue_and_walks_it_away
 	Clock.force_advance_ticks(MIDDAY_START_TICK + int(START_PATIENCE) + 1)
 
 	assert_true(_party_by_id(999).is_empty(), "the expired party should be gone from the pending queue")
-	assert_signal_emitted_with_parameters(EventBus, "guest_turned_away", ["Test Guest 999", "test_species", "fully_booked"])
+	assert_signal_emitted_with_parameters(EventBus, "guest_turned_away", ["Test Guest 999", "test_species", "fully_booked", 999])
 
 
 func test_patience_expiring_with_no_eligible_room_type_costs_reputation() -> void:

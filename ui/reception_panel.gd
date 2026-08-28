@@ -194,3 +194,23 @@ func _label(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
 	return l
+
+
+## Locates the currently-built PartyCardButton for party_id, for
+## ui/room_occupancy_layer.gd's turn-away overlay (ticket 05) to read a live
+## queue position from before this panel's next refresh() rebuilds the row
+## out from under it (see this file's class doc: refresh() tears down and
+## rebuilds every card on tick_advanced/phase_changed). Returns null if that
+## Party isn't currently rendered.
+func find_party_card(party_id: int) -> Control:
+	return _find_party_card(self, party_id)
+
+
+func _find_party_card(node: Node, party_id: int) -> Control:
+	for child in node.get_children():
+		if child is PartyCardButton and child.party_id == party_id:
+			return child
+		var found := _find_party_card(child, party_id)
+		if found != null:
+			return found
+	return null

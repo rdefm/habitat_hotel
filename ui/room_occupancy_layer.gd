@@ -7,8 +7,21 @@ extends Control
 ## a seated Party landed on, plus a persistent guest actor standing in that
 ## cell for the whole stay. lobby_view.gd's guest_seated handling (and its
 ## matching decorative bellhop round-trip) is removed by this ticket in
-## favor of this file; turned-away/checked-out/room-dirty are still
-## lobby_view.gd's job until tickets 05/09 replace them too.
+## favor of this file; turned-away/checked-out are covered by ticket 05
+## below, while room-dirty (the housekeeper's own travel) stays
+## lobby_view.gd's job until ticket 09 replaces it too.
+##
+## Ticket 05 extends this same overlay with the symmetric reverse trips:
+## guest_checked_out walks a Room's persistent occupant actor back down to
+## Reception and despawns it there (replacing the old
+## room_marked_dirty-triggered instant despawn -- room_marked_dirty always
+## follows guest_checked_out for the same Room, per sim_controller.gd's
+## _checkout_guest(), so this file no longer needs to listen for it at all),
+## and guest_turned_away walks a waiting Party's actor from its real
+## Reception queue card back out and despawns it. Both are one-shot tweens
+## from a live-captured start position rather than continuously re-anchored
+## like an in-flight walk-in or a settled occupant, since neither has a
+## later sim event that would need to find the actor again mid-flight.
 ##
 ## Lives as a screen-space overlay sibling *above* HotelView in
 ## main_screen's tree (mouse_filter IGNORE, so it never intercepts a tap/drag
@@ -46,6 +59,13 @@ const ACTOR_SIZE := Vector2(36, 52)
 const GUEST_TRAVEL_OFFSET := Vector2(-14, 0)
 const BELLHOP_TRAVEL_OFFSET := Vector2(14, 0)
 const UNSTAFFED_WALK_DURATION := 0.8
+const CHECKOUT_WALK_DURATION := 0.8
+const TURN_AWAY_WALK_DURATION := 0.8
+## How far outside Reception's own rect the "entrance" a turned-away Party
+## walks out through sits -- there's no dedicated entrance node in the
+## spatial view (ADR-0016), so this is a fixed offset from Reception's own
+## live rect rather than a second panel reference.
+const ENTRANCE_OFFSET_X := 80.0
 
 ## Set by main_screen before/after this node enters the tree -- read lazily
 ## (find_room_cell()/get_global_rect() calls) rather than cached, so a later
@@ -66,7 +86,8 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	EventBus.guest_seated.connect(_on_guest_seated)
-	EventBus.room_marked_dirty.connect(_on_room_marked_dirty)
+	EventBus.guest_checked_out.connect(_on_guest_checked_out)
+	EventBus.guest_turned_away.connect(_on_guest_turned_away)
 	EventBus.tick_advanced.connect(_on_tick_advanced)
 	set_process(true)
 
@@ -111,16 +132,62 @@ func _on_guest_seated(guest_name: String, species_id: String, room_type_id: Stri
 	}
 
 
-## Fires exactly at checkout (see sim_controller.gd's _checkout_guest()) --
-## the persistent occupant actor despawns immediately, no animation of its
-## own yet (ticket 05 gives checkout its own walk-out).
-func _on_room_marked_dirty(room_type_id: String, instance_id: int) -> void:
+## Fires exactly at checkout (see sim_controller.gd's _checkout_guest()),
+## before that same call clears the Room's occupant and emits
+## room_marked_dirty -- claims the persistent occupant actor out of
+## _occupants here so a later room_marked_dirty/HotelPanel.refresh() rebuild
+## can't free it out from under this walk. Also cancels a still-in-flight
+## walk-in for the same key -- can't happen today (a stay's first night
+## doesn't resolve until well after any walk-in animation completes), but
+## staying defensive here (as _on_guest_seated's own key-collision guard
+## already does) keeps a hypothetical orphaned walker from permanently
+## blocking that Room from ever being re-seated.
+func _on_guest_checked_out(_guest_name: String, _species_id: String, room_type_id: String, instance_id: int) -> void:
 	var key := _room_key(room_type_id, instance_id)
-	if _occupants.has(key):
-		_occupants[key]["guest"].queue_free()
-		_occupants.erase(key)
-	if _walking.has(key): # can't happen today (checkout only follows a resolved stay), stay defensive
+	if _walking.has(key):
 		_cancel_walk(key)
+		return
+	if not _occupants.has(key): # defensive -- checkout should always follow a tracked occupant
+		return
+	var occ: Dictionary = _occupants[key]
+	_occupants.erase(key)
+	_play_checkout_walk(occ["guest"])
+
+
+func _play_checkout_walk(guest: Control) -> void:
+	var target := _reception_anchor() - ACTOR_SIZE / 2.0
+	var tween := create_tween()
+	tween.tween_property(guest, "position", target, CHECKOUT_WALK_DURATION)
+	tween.tween_callback(guest.queue_free)
+
+
+## reception_panel.gd's queue hasn't rebuilt for this tick yet when this
+## runs -- sim_controller.gd (an autoload) connects to EventBus.tick_advanced
+## in its own _ready(), which always registers before any UI node's, so its
+## _decay_patience() -> guest_turned_away chain fully resolves (including
+## this listener) before reception_panel's own tick_advanced-triggered
+## refresh() gets a turn. That's what lets _turn_away_start_position() below
+## read the Party's real, still-live queue card instead of a fixed stand-in.
+func _on_guest_turned_away(guest_name: String, species_id: String, reason: String, party_id: int) -> void:
+	var guest := _make_turned_away_guest(guest_name, species_id, reason)
+	guest.position = _turn_away_start_position(party_id) - ACTOR_SIZE / 2.0
+	add_child(guest)
+
+	var tween := create_tween()
+	tween.tween_property(guest, "position", _entrance_anchor() - ACTOR_SIZE / 2.0, TURN_AWAY_WALK_DURATION)
+	tween.tween_callback(guest.queue_free)
+
+
+func _turn_away_start_position(party_id: int) -> Vector2:
+	if reception_panel != null:
+		var card := reception_panel.find_party_card(party_id)
+		if card != null:
+			return _to_local(card.get_global_rect().get_center())
+	# Defensive only -- per this function's caller's doc comment, the
+	# ordering guarantee means card should always be found; this falls back
+	# to the general Reception anchor (the "fixed stand-in" the ticket asks
+	# this overlay to avoid) only if that guarantee is ever broken.
+	return _reception_anchor()
 
 
 func _on_tick_advanced(_day: int, _tick_in_day: int) -> void:
@@ -218,6 +285,15 @@ func _reception_anchor() -> Vector2:
 	return _to_local(reception_panel.get_global_rect().get_center())
 
 
+## See ENTRANCE_OFFSET_X's doc -- a fixed offset outside Reception's own live
+## rect, rather than a dedicated entrance node.
+func _entrance_anchor() -> Vector2:
+	if reception_panel == null:
+		return Vector2.ZERO
+	var rect := reception_panel.get_global_rect()
+	return _to_local(Vector2(rect.position.x - ENTRANCE_OFFSET_X, rect.get_center().y))
+
+
 func _to_local(global_pos: Vector2) -> Vector2:
 	return global_pos - global_position
 
@@ -226,6 +302,13 @@ func _make_guest(guest_name: String, species_id: String, mismatch: bool) -> Cont
 	var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
 	var token := _make_token(species_name.left(3), Color(1.0, 0.85, 0.5) if mismatch else Color(0.75, 1.0, 0.75))
 	token.tooltip_text = "%s the %s -- %s" % [guest_name, species_name, ("mismatch" if mismatch else "perfect fit")]
+	return token
+
+
+func _make_turned_away_guest(guest_name: String, species_id: String, reason: String) -> Control:
+	var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
+	var token := _make_token(species_name.left(3), Color(0.85, 0.4, 0.4))
+	token.tooltip_text = "%s the %s -- turned away (%s)" % [guest_name, species_name, reason]
 	return token
 
 
