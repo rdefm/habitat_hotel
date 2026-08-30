@@ -47,6 +47,16 @@ extends VBoxContainer
 ## flat, rounded shape so the tier-tinted token reads as a standing
 ## character rather than a UI button, per ADR-0015/0016's "plain colored
 ## shapes" actors.
+##
+## Reception admin modal (ticket 07, ADR-0016): the structure itself (the
+## header, distinct from any Party actor in the queue below it) is a
+## tappable Button, mirroring ui/terrace_panel.gd's tap_btn -- main_screen
+## opens ui/reception_menu.gd's bundled Prices/Hire/Reports/Reviews modal
+## off reception_tapped, the same generic-overlay flow that replaced the
+## retired bottom menu bar. It's built once in _ready() rather than inside
+## refresh()'s rebuild, so the tap target doesn't churn every tick; only
+## the queue itself (now under _content) is torn down and rebuilt on
+## refresh().
 
 const PatienceState = preload("res://sim/patience_state.gd")
 const ActorStyle = preload("res://ui/actor_style.gd")
@@ -83,6 +93,10 @@ class PartyCardButton extends Button:
 
 signal party_selected(party_id: int)
 
+## Emitted when the Reception structure itself is tapped (not a Party
+## actor) -- main_screen opens ui/reception_menu.gd off this.
+signal reception_tapped
+
 const ACTOR_MIN_SIZE := Vector2(44, 64)
 
 const TIER_COLOR := {
@@ -94,9 +108,21 @@ const TIER_COLOR := {
 var _selected_party_id: int = -1
 var dinner_addon_selected: bool = false
 
+var _content: VBoxContainer
+
 
 func _ready() -> void:
 	add_theme_constant_override("separation", 4)
+
+	var tap_btn := Button.new()
+	tap_btn.text = "Reception -- tap for Prices, Hire, Reports, Reviews"
+	tap_btn.pressed.connect(func(): reception_tapped.emit())
+	add_child(tap_btn)
+
+	_content = VBoxContainer.new()
+	_content.add_theme_constant_override("separation", 4)
+	add_child(_content)
+
 	refresh()
 	EventBus.tick_advanced.connect(func(_d, _t): refresh())
 	EventBus.phase_changed.connect(func(_d, _p): refresh())
@@ -116,23 +142,18 @@ func refresh() -> void:
 		_selected_party_id = -1
 		party_selected.emit(-1)
 
-	for child in get_children():
+	for child in _content.get_children():
 		child.queue_free()
 
-	var header := Label.new()
-	header.text = "Reception"
-	header.add_theme_font_size_override("font_size", 16)
-	add_child(header)
-
 	if Sim.pending_arrivals.is_empty():
-		add_child(_label("No one waiting."))
+		_content.add_child(_label("No one waiting."))
 		return
 
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0, ACTOR_MIN_SIZE.y + 8)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	add_child(scroll)
+	_content.add_child(scroll)
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 2)
@@ -142,7 +163,7 @@ func refresh() -> void:
 		row.add_child(_make_actor(party))
 
 	if _selected_party_id != -1:
-		add_child(_make_dinner_addon_check())
+		_content.add_child(_make_dinner_addon_check())
 
 
 func _make_actor(party: Dictionary) -> Button:

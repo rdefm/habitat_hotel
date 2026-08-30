@@ -1,10 +1,15 @@
 extends Control
 
-## Chunk 2 main screen: top bar, menu buttons, a decorative hotel panel, a
-## day log ticker, a generic modal overlay, and a bespoke small-popup host
+## Chunk 2 main screen: top bar, a decorative hotel panel, a day log
+## ticker, a generic modal overlay, and a bespoke small-popup host
 ## (ADR-0011; see ui/popup_host.gd). This is the Fun Gate's actual playable
 ## surface -- everything here reads from/writes to GameState via its public
 ## API, never touching Sim internals directly.
+##
+## The bottom menu bar (Prices/Hire/Reports/Reviews) is retired (ticket 07,
+## ADR-0016): those four menus now live as tabs of ui/reception_menu.gd,
+## opened by tapping the Reception structure itself the same way
+## _on_terrace_tapped already opens ui/terrace_menu.gd.
 
 const HotelView = preload("res://ui/hotel_view.gd")
 const HotelPanel = preload("res://ui/hotel_panel.gd")
@@ -16,10 +21,7 @@ const SeatConfirmMenu = preload("res://ui/seat_confirm_menu.gd")
 const StayInfoMenu = preload("res://ui/stay_info_menu.gd")
 const BuildConfirmMenu = preload("res://ui/build_confirm_menu.gd")
 const StafferDetailMenu = preload("res://ui/staffer_detail_menu.gd")
-const PricesMenu = preload("res://ui/prices_menu.gd")
-const HireMenu = preload("res://ui/hire_menu.gd")
-const ReportsMenu = preload("res://ui/reports_menu.gd")
-const ReviewsMenu = preload("res://ui/reviews_menu.gd")
+const ReceptionMenu = preload("res://ui/reception_menu.gd")
 const UpgradeMenu = preload("res://ui/upgrade_menu.gd")
 const TerraceMenu = preload("res://ui/terrace_menu.gd")
 const LobbyView = preload("res://ui/lobby_view.gd")
@@ -60,7 +62,6 @@ func _ready() -> void:
 	add_child(root)
 
 	root.add_child(_build_top_bar())
-	root.add_child(_build_menu_bar())
 	root.add_child(LobbyView.new())
 
 	var hotel_view := HotelView.new()
@@ -76,6 +77,7 @@ func _ready() -> void:
 
 	_reception_panel = hotel_view.reception_panel
 	_reception_panel.party_selected.connect(_on_party_selected)
+	_reception_panel.reception_tapped.connect(_on_reception_tapped)
 
 	_station_panel = hotel_view.station_panel
 	_station_panel.staffer_tapped.connect(_on_staffer_tapped)
@@ -164,29 +166,6 @@ func _refresh_top_bar() -> void:
 	_season_label.text = GameState.season.capitalize()
 
 
-## --- Menu bar ---
-
-func _build_menu_bar() -> HBoxContainer:
-	var bar := HBoxContainer.new()
-	bar.add_theme_constant_override("separation", 6)
-
-	var entries := [
-		["Prices", func(): return PricesMenu.new()],
-		["Hire", func(): return HireMenu.new()],
-		["Reports", func(): return ReportsMenu.new()],
-		["Reviews", func(): return ReviewsMenu.new()],
-	]
-	for entry in entries:
-		var label: String = entry[0]
-		var factory: Callable = entry[1]
-		var btn := Button.new()
-		btn.text = label
-		btn.pressed.connect(func(): open_menu(label, factory.call()))
-		bar.add_child(btn)
-
-	return bar
-
-
 ## --- Hotel panel (the always-visible grid) ---
 
 func _on_hotel_slot_selected(room_type_id: String, instance_id: int) -> void:
@@ -255,6 +234,13 @@ func _open_upgrade_menu(room_type_id: String, instance_id: int) -> void:
 
 
 ## --- Reception (tap a Party, then tap a Room to seat -- ADR-0001, ticket 05) ---
+
+## Reception admin modal (ticket 07, ADR-0016: bundles the retired bottom
+## menu bar's Prices/Hire/Reports/Reviews as tabs), mirroring
+## _on_terrace_tapped's tap-the-structure-for-a-modal pattern.
+func _on_reception_tapped() -> void:
+	open_menu("Reception", ReceptionMenu.new())
+
 
 func _on_party_selected(party_id: int) -> void:
 	_hotel_panel.selected_party_id = party_id
