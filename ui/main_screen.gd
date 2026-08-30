@@ -25,8 +25,8 @@ const StafferDetailMenu = preload("res://ui/staffer_detail_menu.gd")
 const ReceptionMenu = preload("res://ui/reception_menu.gd")
 const UpgradeMenu = preload("res://ui/upgrade_menu.gd")
 const TerraceMenu = preload("res://ui/terrace_menu.gd")
-const LobbyView = preload("res://ui/lobby_view.gd")
 const RoomOccupancyLayer = preload("res://ui/room_occupancy_layer.gd")
+const StaffJobTravelLayer = preload("res://ui/staff_job_travel_layer.gd")
 const ToastLayer = preload("res://ui/toast_layer.gd")
 
 var _cash_label: Label
@@ -48,6 +48,7 @@ var _hotel_panel: HotelPanel
 var _reception_panel: ReceptionPanel
 var _station_panel: StationPanel
 var _room_occupancy_layer: RoomOccupancyLayer
+var _staff_job_travel_layer: StaffJobTravelLayer
 var _toast_layer: ToastLayer
 var _terrace_panel: TerracePanel
 
@@ -60,7 +61,6 @@ func _ready() -> void:
 	add_child(root)
 
 	root.add_child(_build_top_bar())
-	root.add_child(LobbyView.new())
 
 	var hotel_view := HotelView.new()
 	hotel_view.interactive = true
@@ -90,6 +90,16 @@ func _ready() -> void:
 	_room_occupancy_layer.hotel_panel = _hotel_panel
 	_room_occupancy_layer.reception_panel = _reception_panel
 	add_child(_room_occupancy_layer)
+
+	## Staff Job travel layer (ticket 09, ADR-0016): another screen-space
+	## overlay sibling, replacing ui/lobby_view.gd's old decorative,
+	## disconnected Housekeeping/Kitchen round-trips with real travel to a
+	## Job's actual Room cell or Diner actor.
+	_staff_job_travel_layer = StaffJobTravelLayer.new()
+	_staff_job_travel_layer.hotel_panel = _hotel_panel
+	_staff_job_travel_layer.station_panel = _station_panel
+	_staff_job_travel_layer.terrace_panel = _terrace_panel
+	add_child(_staff_job_travel_layer)
 
 	## Toast layer (ticket 08, ADR-0016): another screen-space overlay
 	## sibling, mounted above _room_occupancy_layer so a toast never renders

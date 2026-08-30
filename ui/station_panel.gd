@@ -62,6 +62,11 @@ var _station_row: HBoxContainer
 var _pool_row: HBoxContainer
 var _wage_label: Label
 
+## station_id -> its zone Control, populated by refresh() -- lets
+## ui/staff_job_travel_layer.gd (ticket 09) find a live "home" anchor
+## position for a Housekeeping Staffer's travel without hardcoding layout.
+var _zone_by_station: Dictionary = {}
+
 
 func _ready() -> void:
 	add_theme_constant_override("separation", 6)
@@ -103,8 +108,11 @@ func refresh() -> void:
 	for child in _pool_row.get_children():
 		child.queue_free()
 
+	_zone_by_station.clear()
 	for station_id in STATION_IDS:
-		_station_row.add_child(_make_zone(station_id))
+		var zone := _make_zone(station_id)
+		_zone_by_station[station_id] = zone
+		_station_row.add_child(zone)
 
 	var pool_ids: Array = []
 	for staffer_id in GameState.staffers.keys():
@@ -116,6 +124,14 @@ func refresh() -> void:
 		_pool_row.add_child(_label("(everyone's assigned)"))
 	for staffer_id in pool_ids:
 		_pool_row.add_child(_make_actor(staffer_id))
+
+
+## Read-only lookup for ui/staff_job_travel_layer.gd (ticket 09): the
+## Control whose live get_global_rect() is a Housekeeping Staffer's "home"
+## position to travel from/back to. Returns null if refresh() hasn't run yet
+## or station_id isn't one of STATION_IDS.
+func find_zone(station_id: String) -> Control:
+	return _zone_by_station.get(station_id)
 
 
 func _make_zone(station_id: String) -> Control:

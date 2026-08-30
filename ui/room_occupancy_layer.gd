@@ -8,8 +8,10 @@ extends Control
 ## cell for the whole stay. lobby_view.gd's guest_seated handling (and its
 ## matching decorative bellhop round-trip) is removed by this ticket in
 ## favor of this file; turned-away/checked-out are covered by ticket 05
-## below, while room-dirty (the housekeeper's own travel) stays
-## lobby_view.gd's job until ticket 09 replaces it too.
+## below, while room-dirty (a Housekeeping Staffer's own travel to and from
+## the dirty Room) is ui/staff_job_travel_layer.gd's job (ticket 09), which
+## replaced lobby_view.gd's old decorative, disconnected housekeeper
+## round-trip entirely.
 ##
 ## Ticket 05 extends this same overlay with the symmetric reverse trips:
 ## guest_checked_out walks a Room's persistent occupant actor back down to

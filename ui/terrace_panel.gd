@@ -232,6 +232,29 @@ func _actor_caption(species_name: String, party_size: int) -> String:
 	return caption
 
 
+## Read-only lookups for ui/staff_job_travel_layer.gd (ticket 09), mirroring
+## ui/reception_panel.gd's find_party_card() -- a live QueueEntryButton whose
+## get_global_rect() is the real Diner actor position a Kitchen Staffer
+## travels to. Both queues rebuild every refresh() (see class doc), so this
+## is looked up fresh on demand rather than cached.
+func find_breakfast_entry(entry_id: int) -> Control:
+	return _find_queue_entry(_breakfast_list, "breakfast", entry_id)
+
+
+func find_dinner_entry(entry_id: int) -> Control:
+	return _find_queue_entry(_dinner_list, "dinner", entry_id)
+
+
+func _find_queue_entry(node: Node, kind: String, entry_id: int) -> Control:
+	for child in node.get_children():
+		if child is QueueEntryButton and child.kind == kind and child.entry_id == entry_id:
+			return child
+		var found := _find_queue_entry(child, kind, entry_id)
+		if found != null:
+			return found
+	return null
+
+
 func _label(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
