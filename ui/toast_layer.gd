@@ -11,11 +11,12 @@ extends Control
 ## one panel, so a HotelPanel.refresh() rebuild can't free a toast out from
 ## under itself.
 ##
-## Toast text is byte-for-byte what main_screen.gd's old
+## Toast text carries the same information main_screen.gd's old
 ## _on_day_summary/_on_review_posted/_on_forecast_ready handlers used to
-## append to the day log -- only the destination (a floating node near an
-## anchor, not a ticker line) changed. review_posted now also carries the
-## checkout's room_type_id/instance_id (sim_controller.gd's
+## append to the day log, minus the BBCode markup that only made sense
+## inside the old RichTextLabel (a toast Label colors its whole line via
+## Color instead of highlighting one colored substring). review_posted now
+## also carries the checkout's room_type_id/instance_id (sim_controller.gd's
 ## _checkout_guest()) so its toast can anchor to that Room's live cell
 ## instead of falling back to Reception.
 ##
@@ -30,6 +31,7 @@ extends Control
 const DemandFormat = preload("res://ui/demand_format.gd")
 const HotelPanel = preload("res://ui/hotel_panel.gd")
 const ReceptionPanel = preload("res://ui/reception_panel.gd")
+const MatchHint = preload("res://sim/match_hint.gd")
 
 const TOAST_WIDTH := 260.0
 const TOAST_GAP := 6.0
@@ -133,10 +135,14 @@ func _reposition_stack(anchor_key: String) -> void:
 
 ## --- Anchors ---
 
+## Reuses MatchHint.room_key()'s own room_type_id+instance_id key format
+## (room_occupancy_layer.gd's _room_key() does the same) rather than
+## inventing a second one -- prefixed so it can't collide with
+## RECEPTION_ANCHOR_KEY.
 func _room_anchor_key(room_type_id: String, instance_id: int) -> String:
 	if room_type_id == "" or instance_id < 0:
 		return RECEPTION_ANCHOR_KEY # defensive only -- review_posted always carries these today
-	return "room|%s|%d" % [room_type_id, instance_id]
+	return "room|" + MatchHint.room_key({"room_type_id": room_type_id, "instance_id": instance_id})
 
 
 ## Falls back to Reception whenever a Room-cell anchor can't be resolved --
@@ -144,10 +150,11 @@ func _room_anchor_key(room_type_id: String, instance_id: int) -> String:
 ## HotelPanel.refresh() rebuild hasn't recreated the cell for this frame
 ## yet -- so a toast is never simply left un-positioned.
 func _anchor_position(anchor_key: String) -> Vector2:
-	if anchor_key != RECEPTION_ANCHOR_KEY:
-		var parts := anchor_key.split("|")
-		if parts.size() == 3 and hotel_panel != null:
-			var cell := hotel_panel.find_room_cell(parts[1], int(parts[2]))
+	if anchor_key != RECEPTION_ANCHOR_KEY and hotel_panel != null:
+		var room_key := anchor_key.trim_prefix("room|")
+		var parts := room_key.split("#")
+		if parts.size() == 2:
+			var cell := hotel_panel.find_room_cell(parts[0], int(parts[1]))
 			if cell != null:
 				return _to_local(cell.get_global_rect().get_center())
 	return _reception_anchor()
