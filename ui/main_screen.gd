@@ -1,10 +1,11 @@
 extends Control
 
-## Chunk 2 main screen: top bar, a decorative hotel panel, a day log
-## ticker, a generic modal overlay, and a bespoke small-popup host
-## (ADR-0011; see ui/popup_host.gd). This is the Fun Gate's actual playable
-## surface -- everything here reads from/writes to GameState via its public
-## API, never touching Sim internals directly.
+## Chunk 2 main screen: top bar, a decorative hotel panel, a toast layer
+## (ticket 08, ADR-0016; replaces the old scrolling day-log ticker), a
+## generic modal overlay, and a bespoke small-popup host (ADR-0011; see
+## ui/popup_host.gd). This is the Fun Gate's actual playable surface --
+## everything here reads from/writes to GameState via its public API, never
+## touching Sim internals directly.
 ##
 ## The bottom menu bar (Prices/Hire/Reports/Reviews) is retired (ticket 07,
 ## ADR-0016): those four menus now live as tabs of ui/reception_menu.gd,
@@ -26,9 +27,7 @@ const UpgradeMenu = preload("res://ui/upgrade_menu.gd")
 const TerraceMenu = preload("res://ui/terrace_menu.gd")
 const LobbyView = preload("res://ui/lobby_view.gd")
 const RoomOccupancyLayer = preload("res://ui/room_occupancy_layer.gd")
-const DemandFormat = preload("res://ui/demand_format.gd")
-
-const DAY_LOG_MAX_LINES := 200
+const ToastLayer = preload("res://ui/toast_layer.gd")
 
 var _cash_label: Label
 var _hearts_label: Label
@@ -40,8 +39,6 @@ var _pause_button: Button
 var _play_button: Button
 var _fast_button: Button
 
-var _day_log: RichTextLabel
-
 var _overlay: Control
 var _overlay_title: Label
 var _overlay_body: VBoxContainer
@@ -51,6 +48,7 @@ var _hotel_panel: HotelPanel
 var _reception_panel: ReceptionPanel
 var _station_panel: StationPanel
 var _room_occupancy_layer: RoomOccupancyLayer
+var _toast_layer: ToastLayer
 var _terrace_panel: TerracePanel
 
 
@@ -93,18 +91,19 @@ func _ready() -> void:
 	_room_occupancy_layer.reception_panel = _reception_panel
 	add_child(_room_occupancy_layer)
 
-	root.add_child(_build_day_log())
+	## Toast layer (ticket 08, ADR-0016): another screen-space overlay
+	## sibling, mounted above _room_occupancy_layer so a toast never renders
+	## underneath a walk-in/checkout actor anchored at the same spot.
+	_toast_layer = ToastLayer.new()
+	_toast_layer.hotel_panel = _hotel_panel
+	_toast_layer.reception_panel = _reception_panel
+	add_child(_toast_layer)
 
 	_build_overlay()
 
 	_popup_host = PopupHost.new()
 	add_child(_popup_host)
 
-	EventBus.day_summary.connect(_on_day_summary)
-	EventBus.review_posted.connect(_on_review_posted)
-	EventBus.forecast_ready.connect(_on_forecast_ready)
-
-	_log("Welcome to Grand Safari Hotel. Day 1 begins.")
 	_refresh_top_bar()
 	set_process(true)
 
@@ -280,46 +279,6 @@ func _finish_seating_flow() -> void:
 	_reception_panel.clear_selection()
 	_hotel_panel.selected_party_id = -1
 	_hotel_panel.refresh()
-
-
-## --- Day log ---
-
-func _build_day_log() -> Control:
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(0, 140)
-
-	_day_log = RichTextLabel.new()
-	_day_log.bbcode_enabled = true
-	_day_log.scroll_following = true
-	_day_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(_day_log)
-	return panel
-
-
-func _log(line: String) -> void:
-	_day_log.append_text(line + "\n")
-
-
-func _on_day_summary(summary: Dictionary) -> void:
-	var turned_away: int = summary["walked_away_mismatch"] + summary["walked_away_full"] + summary["walked_away_too_expensive"]
-	_log("[b]Day %d[/b] cash %+d, occupancy %.0f%%, %d checkout(s), %d arrival(s), %d turned away" % [
-		summary["day"], summary["cash_delta"], summary["occupancy_rate"] * 100.0, summary["checkouts"],
-		summary["arrivals"], turned_away,
-	])
-	if turned_away > 0:
-		_log("  [color=orange]turned away:[/color] %s" % DemandFormat.summarize_counts(summary["turned_away_species"], GameState.species))
-
-
-func _on_review_posted(review: Dictionary) -> void:
-	var color: String = {"positive": "green", "negative": "red"}.get(review["review"], "gray")
-	var guest_name: String = review.get("guest_name", "") if review.get("guest_name", "") else "Guest"
-	_log("  [color=%s]%s the %s[/color] (%s, %+d cash) -- \"%s\"" % [
-		color, guest_name, review["species_name"], review["review"], review["revenue"], review["flavor_line"],
-	])
-
-
-func _on_forecast_ready(for_day: int, arrivals: Array) -> void:
-	_log("[color=cyan]Forecast for Day %d:[/color] %s" % [for_day, DemandFormat.summarize_arrivals(arrivals, GameState.species)])
 
 
 ## --- Modal overlay (generic; auto-pauses the Clock while a menu is open) ---

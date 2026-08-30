@@ -1214,6 +1214,8 @@ func _checkout_guest(gid: int) -> void:
 		"satisfaction": sat,
 		"revenue": revenue,
 		"flavor_line": flavor_line,
+		"room_type_id": g["room_type_id"],
+		"instance_id": g["room_instance_id"],
 	})
 
 	EventBus.guest_checked_out.emit(g["name"], g["species_id"], g["room_type_id"], g["room_instance_id"])
