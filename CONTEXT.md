@@ -97,8 +97,11 @@ The hotel's overall rating, 1–5, a ratchet that never decreases. Gates which R
 The building's vertical unit. Exactly one Room type per Floor. See [[0004-floor-per-room-type]].
 _Avoid_: Slot grid (the free-form generic-slot model this replaces)
 
+**Bay**:
+One of a Room Floor's two fixed positions, drawn left-to-right, each holding a built Room, a Build Slot, or an empty shell. Every Room Floor has exactly two Bays, matching every Room type's own instance cap. See [[0020-node2d-world-and-camera]].
+
 **Build Slot**:
-The open slot at the end of a Floor's row where another instance of that Floor's Room type can be constructed, up to a per-Floor cap.
+The open Bay where another instance of that Floor's Room type can be constructed, up to a per-Floor cap.
 
 **Amenity**:
 A separate buildable slot-occupant (Pool, Sauna, Perch Garden) that boosts satisfaction for guests whose Likes match. Distinct from the Terrace, which is fixed rather than built.

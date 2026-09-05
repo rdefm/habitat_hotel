@@ -11,12 +11,15 @@ extends Node2D
 ## scroll/pinch within clamped bounds, and can be eased back to fit-all via
 ## ease_to_fit_all() (wired to a HUD button by main_screen.gd). Ticket 07
 ## adds the three Station posts and every Staffer standing at one or in the
-## staff nook; interior bay content (guests, Build Slots, the elevator) is
-## still later tickets' job.
+## staff nook. Ticket 08 adds every Room floor's two bays -- a built Room,
+## a Build Slot, or an empty shell, tappable via room_slot_tapped -- so only
+## guest occupancy sprites, the Match hint glow, and the elevator remain
+## later tickets' job.
 
 const BuildingLayout = preload("res://sim/building_layout.gd")
 const CharacterSprite = preload("res://ui/character_sprite.gd")
 const StafferActor = preload("res://ui/staffer_actor.gd")
+const RoomBayActor = preload("res://ui/room_bay_actor.gd")
 const Station = preload("res://sim/station.gd")
 
 ## Most-zoomed-in Camera2D.zoom value this world allows. Confirmed
@@ -32,10 +35,14 @@ const ZOOM_STEP := 1.1
 const FIT_ALL_EASE_SECONDS := 0.4
 
 ## How far the pointer must move between press and release, in world units,
-## before a Staffer pick-up counts as a drag rather than a tap -- below this
-## it's a tap (opens the detail popup), at or above it it's a drag (drop
-## against a Station post to (re)assign, or a no-op if released elsewhere).
-const STAFFER_DRAG_THRESHOLD := 6.0
+## before a press counts as a drag rather than a tap. For a Staffer
+## pick-up: below this it's a tap (opens the detail popup), at or above it
+## it's a drag (drop against a Station post to (re)assign, or a no-op if
+## released elsewhere). For a Room bay press (ticket 08): the same
+## threshold gates whether a release fires room_slot_tapped at all -- there
+## is no bay drag yet (seating a guest by drag is ticket 11), so a press
+## that moves past it is simply abandoned rather than panning the camera.
+const TAP_MOVEMENT_THRESHOLD := 6.0
 
 ## Generous drop-target box around a Station post's single anchor point
 ## (larger than the post's own STATION_PROP_SIZE render footprint) so a
@@ -46,6 +53,13 @@ const STATION_POST_HIT_SIZE := Vector2(60.0, 60.0)
 ## main_screen can open their existing Skill/Trait detail popup -- same
 ## contract as ui/station_panel.gd's retired staffer_tapped signal.
 signal staffer_tapped(staffer_id: String)
+
+## Emitted whenever a Room bay is tapped (ticket 08) -- a Build Slot
+## (instance_id == -1) or an already-built Room (instance_id >= 0). An
+## empty shell never emits this; it isn't a tap target. Same contract as
+## ui/hotel_panel.gd's retired slot_selected signal, so main_screen's
+## existing _on_hotel_slot_selected handler needs no changes to serve both.
+signal room_slot_tapped(room_type_id: String, instance_id: int)
 
 ## Sky tint per Clock.Phase (autoload/clock.gd), keyed by the enum's plain
 ## int value (MORNING=0, MIDDAY=1, EVENING=2, NIGHT=3) rather than the enum
@@ -76,6 +90,13 @@ var _station_post_rects: Dictionary = {}
 var _staffer_actors: Dictionary = {}
 var _cached_stations_signature := ""
 
+## Ticket 08: Room bay actors (room_type_id + bay index -> RoomBayActor),
+## rebuilt whenever GameState.hotel_rooms changes (a build, a checkout
+## leaving a Room dirty, a cleaning finishing, an upgrade purchased) -- see
+## _process()'s signature check below, same pattern as _cached_stations_signature.
+var _room_bay_actors: Dictionary = {}
+var _cached_rooms_signature := ""
+
 ## Non-empty while a Staffer is picked up (press landed on a StafferActor's
 ## hit_rect()) -- the id being dragged, its press-time world position (for
 ## the tap-vs-drag threshold), and a semi-transparent ghost sprite
@@ -84,6 +105,14 @@ var _cached_stations_signature := ""
 var _drag_staffer_id := ""
 var _drag_start_world := Vector2.ZERO
 var _drag_preview: CharacterSprite = null
+
+## Non-null while a press has landed on a tappable Room bay (a Build Slot
+## or a built Room, never an empty shell), awaiting release to decide tap
+## vs. abandoned press (see TAP_MOVEMENT_THRESHOLD's comment). Mutually
+## exclusive with both camera panning and a Staffer drag, same as those two
+## already are with each other.
+var _press_bay_actor: RoomBayActor = null
+var _press_bay_start_world := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -132,6 +161,13 @@ func _process(_delta: float) -> void:
 		_cached_stations_signature = stations_signature
 		_rebuild_staffers(BuildingLayout.floors(GameState.rooms, GameState.stars))
 
+	## A build, a checkout, a cleaning finishing, or an upgrade purchase all
+	## change hotel_rooms without changing the floor stack itself, so (like
+	## Staffer reassignment above) only the Room bay actors need rebuilding.
+	var rooms_signature := str(GameState.hotel_rooms)
+	if rooms_signature != _cached_rooms_signature:
+		_rebuild_room_bays(BuildingLayout.floors(GameState.rooms, GameState.stars))
+
 
 ## --- Building composition ---
 
@@ -156,6 +192,7 @@ func _rebuild_building() -> void:
 	_rebuild_station_posts(floors)
 	_rebuild_staffers(floors)
 	_cached_stations_signature = str(GameState.stations)
+	_rebuild_room_bays(floors)
 
 	_fit_all_zoom = _fit_zoom(BuildingLayout.fit_all_bounds(floors))
 
@@ -294,6 +331,47 @@ func _rebuild_staffers(floors: Array) -> void:
 		_staffer_actors[staffer_id] = actor
 
 
+## --- Room bays (ticket 08) ---
+##
+## Every Room floor draws exactly two bays (bay_left, bay_right -- the
+## anchor registry) whose content -- a built Room, a Build Slot, or an
+## empty shell -- comes from BuildingLayout.room_bay_states(), and whose
+## visual state (occupancy/dirt/upgrades) comes from
+## room_bay_visual_state() reading that instance's own GameState.hotel_rooms
+## entry. Rebuilt on every structural rebuild and whenever
+## GameState.hotel_rooms changes (see _process()), never mid-tap.
+func _rebuild_room_bays(floors: Array) -> void:
+	for actor in _room_bay_actors.values():
+		actor.queue_free()
+	_room_bay_actors.clear()
+
+	for i in range(floors.size()):
+		var f: Dictionary = floors[i]
+		if f["kind"] != "room":
+			continue
+		var room_type_id: String = String(f["room_type_id"])
+		var level: int = int(f["level"])
+		var bay_states := BuildingLayout.room_bay_states(GameState.floor_instance_count(room_type_id), GameState.can_build_more(room_type_id))
+
+		for bay_index in range(bay_states.size()):
+			var anchor_name := "bay_left" if bay_index == 0 else "bay_right"
+			var rect: Rect2 = BuildingLayout.resolve_anchor(floors, i, anchor_name)
+			var bay_state: Dictionary = bay_states[bay_index]
+
+			var visual_state: Dictionary = {}
+			if bay_state["state"] == "built":
+				var room := GameState.room_instance(room_type_id, int(bay_state["instance_id"]))
+				visual_state = BuildingLayout.room_bay_visual_state(room)
+
+			var actor := RoomBayActor.new()
+			_building.add_child(actor)
+			actor.configure(room_type_id, bay_state, rect.size, BuildingLayout.room_number(level, bay_index), visual_state)
+			actor.position = rect.position
+			_room_bay_actors["%s:%d" % [room_type_id, bay_index]] = actor
+
+	_cached_rooms_signature = str(GameState.hotel_rooms)
+
+
 ## --- Staffer tap/drag (ticket 07) ---
 ##
 ## Hand-rolled against world-space hit rects rather than Godot's Control-
@@ -311,6 +389,18 @@ func _staffer_at(world_pos: Vector2) -> String:
 		if actor.hit_rect().has_point(world_pos):
 			return staffer_id
 	return ""
+
+
+## An empty shell is never a tap target (BuildingLayout.room_bay_states()
+## never gives it a meaningful instance_id to act on), so it's skipped here
+## rather than being handed to the caller to filter out.
+func _tappable_room_bay_at(world_pos: Vector2) -> RoomBayActor:
+	for actor in _room_bay_actors.values():
+		if actor.state == "empty":
+			continue
+		if actor.hit_rect().has_point(world_pos):
+			return actor
+	return null
 
 
 func _station_post_at(world_pos: Vector2) -> String:
@@ -343,7 +433,7 @@ func _update_staffer_drag(world_pos: Vector2) -> void:
 ## no explicit "unassign" gesture exists, matching the old Control view.
 func _end_staffer_drag(world_pos: Vector2) -> void:
 	var staffer_id := _drag_staffer_id
-	var moved := world_pos.distance_to(_drag_start_world) >= STAFFER_DRAG_THRESHOLD
+	var moved := world_pos.distance_to(_drag_start_world) >= TAP_MOVEMENT_THRESHOLD
 
 	_drag_staffer_id = ""
 	if _drag_preview != null:
@@ -463,13 +553,24 @@ func _on_press(world_pos: Vector2) -> void:
 	var staffer_id := _staffer_at(world_pos)
 	if staffer_id != "":
 		_begin_staffer_drag(staffer_id, world_pos)
-	else:
-		_dragging = true
+		return
+
+	var bay := _tappable_room_bay_at(world_pos)
+	if bay != null:
+		_press_bay_actor = bay
+		_press_bay_start_world = world_pos
+		return
+
+	_dragging = true
 
 
 func _on_release(world_pos: Vector2) -> void:
 	if _drag_staffer_id != "":
 		_end_staffer_drag(world_pos)
+	elif _press_bay_actor != null:
+		if world_pos.distance_to(_press_bay_start_world) < TAP_MOVEMENT_THRESHOLD:
+			room_slot_tapped.emit(_press_bay_actor.room_type_id, _press_bay_actor.instance_id)
+		_press_bay_actor = null
 	else:
 		_dragging = false
 

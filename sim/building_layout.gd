@@ -345,6 +345,91 @@ static func _floor_top_y(floors_bottom_to_top: Array, i: int) -> float:
 	return floor_bottom_y(floors_bottom_to_top, i) - float(floors_bottom_to_top[i]["height"])
 
 
+## --- Room bays, Build Slots, and door plates (ticket 08) ---
+##
+## A Room floor always has exactly ROOM_BAY_COUNT bays (bay_left/bay_right,
+## the anchor registry above) -- and, per data/rooms.json, every Room
+## type's max_instances also happens to equal that count today, but
+## room_bay_states() takes built_count/allow_build as plain values rather
+## than reading GameState itself (this module stays a RefCounted of pure
+## functions, no autoload dependencies, matching floors()'s own shape) so
+## it degrades sensibly even if a future Room type's cap were ever lower
+## than ROOM_BAY_COUNT.
+const ROOM_BAY_COUNT := 2
+
+## Per-bay states, left to right: bay 0 (bay_left) is index 0 of the
+## returned Array, bay 1 (bay_right) is index 1. Built instances fill bays
+## in ascending instance_id order first; the next bay after those becomes a
+## Build Slot only if `allow_build` (the caller's GameState.can_build_more()
+## result) says the Floor is still under its instance cap -- AT MOST ONE
+## Build Slot bay per floor, even if more than one bay remains open,
+## mirroring the old Control grid's single trailing "(build)" cell. Any bay
+## past that (there is no second Build Slot) is an empty, unbuildable
+## shell. Each entry is {state: "built"|"build_slot"|"empty", instance_id:
+## int} -- instance_id is only meaningful for "built" (-1 otherwise).
+static func room_bay_states(built_count: int, allow_build: bool) -> Array:
+	var out: Array = []
+	var build_slot_placed := false
+	for bay_index in range(ROOM_BAY_COUNT):
+		if bay_index < built_count:
+			out.append({"state": "built", "instance_id": bay_index})
+		elif not build_slot_placed and allow_build:
+			out.append({"state": "build_slot", "instance_id": -1})
+			build_slot_placed = true
+		else:
+			out.append({"state": "empty", "instance_id": -1})
+	return out
+
+
+## The per-bay visual state a built Room's bay draws, derived from a
+## GameState.hotel_rooms entry's own fields -- occupancy, the cleaning
+## flag, and purchased upgrades -- rather than anything this module tracks
+## itself. `dirty` mirrors the old Control grid's rule (ui/hotel_panel.gd's
+## retired _make_cell()): mess only shows on a currently-UNoccupied Room
+## that still needs cleaning, since an occupied Room's guest is the visible
+## state, not its housekeeping backlog.
+static func room_bay_visual_state(room: Dictionary) -> Dictionary:
+	var occupied: bool = room.get("occupant") != null
+	return {
+		"occupied": occupied,
+		"dirty": not occupied and bool(room.get("needs_cleaning", false)),
+		"upgrade_ids": (room.get("upgrades", []) as Array).duplicate(),
+	}
+
+
+## A built Room's door-plate number, derived purely from its Floor's level
+## and which bay it sits in -- "so a toast or a review connects to the Room
+## it came from" (ticket 08) without needing a separate stored field on the
+## room instance. Bay 0 gets the lower number: Level 2's two Rooms are #201
+## and #202, Level 3's are #301/#302, and so on -- an ordinary hotel
+## floor/room-index numbering scheme.
+static func room_number(level: int, bay_index: int) -> int:
+	return level * 100 + bay_index + 1
+
+
+## --- Room bay props (ticket 08) ---
+##
+## Same open-convention-else-placeholder shape as the single-frame slots
+## below (resolve_tag_icon() et al.): a mess overlay for a dirty bay, and
+## one prop per purchased upgrade id, keyed to the upgrade's own id so any
+## Room type's upgrade catalog (data/rooms.json's per-type "upgrades"
+## array) gets a slot for free with no per-type table to maintain.
+
+const MESS_OVERLAY_SIZE := 40.0
+const MESS_OVERLAY_DIR := "res://assets/effects/"
+
+const UPGRADE_PROP_SIZE := 32.0
+const UPGRADE_PROP_DIR := "res://assets/upgrades/"
+
+
+static func resolve_mess_overlay(probe_fn: Callable = Callable()) -> Dictionary:
+	return _resolve_static_icon(MESS_OVERLAY_DIR, "mess", Vector2(MESS_OVERLAY_SIZE, MESS_OVERLAY_SIZE), probe_fn)
+
+
+static func resolve_upgrade_prop(upgrade_id: String, probe_fn: Callable = Callable()) -> Dictionary:
+	return _resolve_static_icon(UPGRADE_PROP_DIR, upgrade_id, Vector2(UPGRADE_PROP_SIZE, UPGRADE_PROP_SIZE), probe_fn)
+
+
 ## --- Station posts and Staffer placement bucketing (ticket 07) ---
 ##
 ## Each of the three Stations (sim/station.gd's Station.IDS) is a physical
