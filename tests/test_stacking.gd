@@ -12,9 +12,10 @@ extends "res://tests/helpers/sim_test_base.gd"
 ## .scratch/direct-manipulation-amendments/issues/09-drag-drop-stacking.md.
 ##
 ## Starting hotel (data/starting_hotel.json): cozy_nook#0, roost_loft#0.
-## Default Station coverage: Biscuit/Reception, Marlon/Bellhop,
-## Shelly/Housekeeping, Kitchen empty. Skills (data/staffers.json):
-## Biscuit R5 B2 H2 K1, Marlon R2 B5 H3 K3, Shelly R1 B1 H5 K2.
+## Default Station coverage: Biscuit/Reception, Shelly/Housekeeping, Kitchen
+## empty, Marlon unassigned in the Staff Pool (ADR-0019 removed the Bellhop
+## Station he used to start on). Skills (data/staffers.json): Biscuit R5 H2
+## K1, Marlon R2 H3 K3, Shelly R1 H5 K2.
 
 const HK_TICKS_BY_SKILL: Dictionary = {"1": 40, "2": 32, "3": 26, "4": 20, "5": 16} # balance.json
 const BREAKFAST_TICKS_BY_SKILL: Dictionary = {"1": 24, "2": 20, "3": 16, "4": 14, "5": 12}
@@ -43,7 +44,7 @@ func test_stacking_onto_a_room_with_no_in_flight_job_is_rejected() -> void:
 
 	assert_false(Sim.can_stack_staffer_on_room("marlon", "roost_loft", 0))
 	assert_false(Sim.stack_staffer_on_room("marlon", "roost_loft", 0))
-	assert_eq(GameState.staffer_station("marlon"), "bellhop", "a rejected stack shouldn't move the Staffer's Station")
+	assert_eq(GameState.staffer_station("marlon"), "", "a rejected stack shouldn't move the Staffer's Station")
 	assert_true(Sim.cleaning_job("marlon").is_empty())
 
 

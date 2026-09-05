@@ -38,12 +38,15 @@ var _starting_hotel_template: Array = []
 # to DEFAULT_STATION_ASSIGNMENTS alongside the rest of session state.
 var stations: Dictionary = {}
 
-# Mirrors the reference prototype's starting coverage: Biscuit on Reception,
-# Marlon on Bellhop, Shelly on Housekeeping, Kitchen unstaffed (the player
-# assigns someone to run breakfast/dinner service themselves).
+# Mirrors the reference prototype's starting coverage, minus the Bellhop
+# Station ADR-0019 removed: Biscuit on Reception, Shelly on Housekeeping,
+# Kitchen unstaffed (the player assigns someone to run breakfast/dinner
+# service themselves). Marlon, Bellhop's old default Staffer, now starts
+# with no Station at all -- the Staff Pool -- which is a state
+# staffer_station() has always modelled as "" and ui/station_panel.gd
+# already renders its own row for.
 const DEFAULT_STATION_ASSIGNMENTS := {
 	"reception": ["biscuit"],
-	"bellhop": ["marlon"],
 	"housekeeping": ["shelly"],
 	"kitchen": [],
 }
@@ -172,7 +175,6 @@ func _new_room_instance(room_type_id: String, instance_id: int) -> Dictionary:
 		"needs_cleaning": false,
 		"checking_in": false,
 		"checkin_ticks_remaining": 0,
-		"escort_mode": false,
 	}
 
 

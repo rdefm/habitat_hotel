@@ -1,6 +1,6 @@
 # Habitat Hotel
 
-An animal hotel management sim: guests of various species check into tagged rooms, staff run four live service stations, and a dining terrace runs breakfast and dinner service alongside room stays. Single context — this file covers the whole game.
+An animal hotel management sim: guests of various species check into tagged rooms, staff run three live service stations, and a dining terrace runs breakfast and dinner service alongside room stays. Single context — this file covers the whole game.
 
 ## Language
 
@@ -34,8 +34,8 @@ A Party's stay ending. Triggers a review, Hearts, and a Reputation change, and l
 ### Staff & Stations
 
 **Station**:
-One of the four live service posts — Reception, Bellhop, Housekeeping, Kitchen — that a Staffer can be assigned to. Distinct from a fixed job title: any Staffer can work any Station.
-_Avoid_: Role (implies permanence; a Staffer's Station is freely reassignable)
+One of the three live service posts — Reception, Housekeeping, Kitchen — that a Staffer can be assigned to. Distinct from a fixed job title: any Staffer can work any Station. A Staffer assigned to none of them is in the **Staff Pool**.
+_Avoid_: Role (implies permanence; a Staffer's Station is freely reassignable), Bellhop (a fourth Station until [[0019-bellhop-station-and-escort-removed]] cut it; check-in is now a flat delay no Station gates)
 
 **Staffer**:
 A named individual with a Skill rating at every Station (lopsided toward a home specialty). New Staffers join the Roster by unlocking, not by hiring.
@@ -51,16 +51,16 @@ A Staffer assignment state that trades Station work for faster Skill growth in o
 A Staffer modifier with one mechanical cost and one benefit (e.g., Perfectionist cleans slower but boosts the next stay's satisfaction). Distinct from Skill (a numeric per-Station rating) and from a Species' Needs/Likes. See [[0013-traits-become-mechanical]].
 
 **Job**:
-A single unit of Housekeeping, Kitchen, or Bellhop work with one target — a Room to clean, a Diner/breakfast entry to serve, or a just-seated Party to Escort. One or more Staffers can be assigned to a Housekeeping/Kitchen Job; a Bellhop Escort Job is capped at one. See [[0008-staffer-stacking-on-jobs]], [[0017-bellhop-escort-implementation]].
+A single unit of Housekeeping or Kitchen work with one target — a Room to clean, or a Diner/breakfast entry to serve. One or more Staffers can be assigned to a Job. Reception has no per-target Job. See [[0008-staffer-stacking-on-jobs]].
 
 **Stacking**:
-Assigning a second Staffer to a Job already in progress at Housekeeping or Kitchen, summing Skill to finish faster. Capped at 2 Staffers per Job; Reception has no per-target Job to Stack on, and Bellhop's Escort Job is capped at 1 Staffer so there's nothing to Stack onto either. See [[0008-staffer-stacking-on-jobs]].
+Assigning a second Staffer to a Job already in progress at Housekeeping or Kitchen, summing Skill to finish faster. Capped at 2 Staffers per Job; Reception has no per-target Job to Stack on. See [[0008-staffer-stacking-on-jobs]].
 
-**Escort**:
-The Bellhop's timed delivery of a just-seated Party from Reception to their Room, replacing instant check-in whenever a Bellhop Staffer is free. A Skill-scaled per-Staffer Job (mirroring Housekeeping's): every assigned, idle Bellhop Staffer claims and works one Escort at a time in parallel with any other assigned Bellhop; a Party seated while all assigned Bellhops are already escorting waits for the next one to free up rather than falling back to the unstaffed flat delay. See [[0014-bellhop-escorted-checkin]], [[0017-bellhop-escort-implementation]].
+**Staff Pool**:
+The Staffers currently assigned to no Station at all — the roster's bench. Not a Station and not a Job: a pooled Staffer does nothing until assigned. Marlon starts here.
 
 **Roster**:
-The set of Staffers currently unlocked and available for Station assignment. Grows via milestone unlocks (star level, cash, story beats) — never a procedurally generated hire/fire pool. See [[0002-staff-roster-unlocks]].
+The set of Staffers currently unlocked and available for Station assignment (whether currently assigned or sitting in the Staff Pool). Grows via milestone unlocks (star level, cash, story beats) — never a procedurally generated hire/fire pool. See [[0002-staff-roster-unlocks]].
 
 ### Dining
 

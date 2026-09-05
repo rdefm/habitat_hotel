@@ -13,13 +13,11 @@ extends Control
 ## serving. lobby_view.gd's own housekeeper round-trip is retired by this
 ## ticket in favor of this file.
 ##
-## Unlike the Bellhop Escort's travel (room_occupancy_layer.gd's
-## _advance_escort(), where movement is stretched across the whole Job via a
-## tick-driven fraction because the Escort *is* the delivery), Housekeeping/
-## Kitchen Jobs model cleaning/serving *work* time, not travel time -- there's
-## no separate "en route" tick count to drive a fraction against. So travel
-## here is a fixed-duration one-shot Tween for each leg (mirroring
-## room_occupancy_layer.gd's CHECKOUT_WALK_DURATION-style trips), with the
+## Housekeeping/Kitchen Jobs model cleaning/serving *work* time, not travel
+## time -- there's no separate "en route" tick count to drive a movement
+## fraction against. So travel here is a fixed-duration one-shot Tween for
+## each leg (mirroring room_occupancy_layer.gd's own
+## CHECKIN_WALK_DURATION/CHECKOUT_WALK_DURATION trips), with the
 ## Staffer simply standing at the target for the (possibly long) remainder of
 ## the Job's ticks_remaining in between -- matching the ticket's own "travels
 ## ... and remains there until the Job completes, then returns" wording.
@@ -76,9 +74,9 @@ func _ready() -> void:
 
 ## Keeps every parked (already-arrived) Staffer glued to its live target
 ## position every rendered frame -- a Staffer still mid-outbound-Tween is left
-## alone here since the Tween itself owns its position for that leg, same
-## split room_occupancy_layer.gd's own _process()/_advance_escort() draw
-## between occupants and mid-Escort walkers.
+## alone here since the Tween itself owns its position for that leg, the same
+## split room_occupancy_layer.gd draws between a settled occupant and a guest
+## mid-walk into their Room.
 func _process(_delta: float) -> void:
 	for staffer_id in _travel:
 		var entry: Dictionary = _travel[staffer_id]
@@ -253,8 +251,8 @@ func _end_travel(staffer_id: String, resolved: bool) -> void:
 ## itself, since Kitchen's own Station zone only exists inside
 ## ui/terrace_menu.gd's modal (ADR-0010) rather than anywhere on the
 ## permanently visible spatial view -- mirroring how room_occupancy_layer.gd
-## anchors a Bellhop's travel on Reception's own rect rather than a dedicated
-## Bellhop-zone rect.
+## anchors a guest's check-in walk on Reception's own rect rather than a
+## dedicated entrance node.
 func _home_anchor(kind: String) -> Vector2:
 	if kind == "housekeeping":
 		if station_panel == null:

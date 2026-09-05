@@ -4,7 +4,7 @@ extends VBoxContainer
 ## The Terrace's modal (ticket 05, ADR-0009/0010): Kitchen Station staffing
 ## -- tap a Staffer card then tap the Kitchen card to (re)assign, the same
 ## Sim.assign_staffer() call and interruption semantics
-## ui/station_panel.gd uses for Reception/Bellhop/Housekeeping (ticket 04),
+## ui/station_panel.gd uses for Reception/Housekeeping (ticket 04),
 ## via the StafferCard/StationCard widgets moved here off ui/roster_menu.gd
 ## -- the Daily Special picker, and the Terrace's own Upgrade list (reusing
 ## UpgradeMenu's purchase-row pattern (tickets 03/13) but addressed by the

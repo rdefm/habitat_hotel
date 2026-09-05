@@ -10,15 +10,13 @@ extends "res://tests/helpers/sim_test_base.gd"
 ## autopilot) and Sim.assign_staffer() -- rather than any new admission or
 ## dining-resolution logic of its own.
 ##
-## Starting Roster only covers 3 of 4 Stations at once (data/staffers.json:
-## Biscuit/Marlon/Shelly). BatchRunner.run()'s default leaves Kitchen empty
-## (matching interactive play's starting coverage), which would mean Dining
-## never actually serves anyone in a batch run -- so this test passes
-## {"marlon": "kitchen"} (Marlon's the only Staffer whose kitchen skill, 3,
-## clears stations.kitchen.dinner_min_skill) to actually exercise Dining
-## service, at the cost of leaving Bellhop unstaffed for the run (just a
-## flat check-in delay -- see sim_controller.gd's _start_checkin(), nothing
-## that can strand a guest).
+## BatchRunner.run()'s default leaves Kitchen empty (matching interactive
+## play's starting coverage), which would mean Dining never actually serves
+## anyone in a batch run -- so this test passes {"marlon": "kitchen"}
+## (Marlon's the only Staffer whose kitchen skill, 3, clears
+## stations.kitchen.dinner_min_skill) to actually exercise Dining service.
+## That fills every one of the three Stations (ADR-0019), since Marlon
+## starts unassigned rather than on the removed Bellhop Station.
 
 const BatchRunner = preload("res://sim/batch_runner.gd")
 const RUN_DAYS := 60

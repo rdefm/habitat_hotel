@@ -9,7 +9,7 @@ extends RefCounted
 ## as harmless no-ops and already interrupts only the moved Staffer's own
 ## in-flight job -- then calls on_assigned so the caller can clear its own
 ## selection and refresh. Shared by ui/station_panel.gd
-## (Reception/Bellhop/Housekeeping, ticket 04) and ui/terrace_menu.gd
+## (Reception/Housekeeping, ticket 04) and ui/terrace_menu.gd
 ## (Kitchen, ticket 05).
 ##
 ## Drag-and-drop (ticket 08, ADR-0009): the returned button is a

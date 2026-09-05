@@ -5,22 +5,27 @@ extends "res://tests/helpers/sim_test_base.gd"
 ## every Station, Sim.assign_staffer() is the sole reassignment path and
 ## interrupts only the moved Staffer's own in-flight Housekeeping job, and
 ## leaving a Station empty measurably degrades that Station's service
-## (Reception's Patience decay, Bellhop's check-in delay, Housekeeping's
-## cleaning throughput). Kitchen assignment is tracked but ungated until
-## ticket 09 wires it to Dining. See
+## (Reception's Patience decay, Housekeeping's cleaning throughput). Kitchen
+## assignment is tracked but ungated until ticket 09 wires it to Dining. See
 ## .scratch/direct-manipulation-core-loop/issues/07-roster-station-core.md.
+##
+## The hotel runs on three Stations (ADR-0019): Bellhop and its Escort Job
+## are gone, so check-in is a flat, staffing-independent delay every Party
+## walks off on its own -- see test_check_in_is_a_flat_delay_no_station_gates().
 ##
 ## Starting hotel (data/starting_hotel.json): cozy_nook#0 (capacity 2, tags
 ## warm/dry/quiet), roost_loft#0 (capacity 4, tags high_perch/dry),
 ## lagoon_room#0/#1 (capacity 3, tags warm/water). Default Station coverage
 ## (GameState.DEFAULT_STATION_ASSIGNMENTS): Biscuit/Reception,
-## Marlon/Bellhop, Shelly/Housekeeping, Kitchen empty.
+## Shelly/Housekeeping, Kitchen empty, Marlon unassigned in the Staff Pool.
+
+const Station = preload("res://sim/station.gd")
 
 const START_PATIENCE: float = 80.0 # data/balance.json's patience.start
 const DECAY_PER_TICK: float = 1.0 # data/balance.json's patience.decay_per_tick
 const MIDDAY_START_TICK := 61 # Clock.PHASE_START_TICKS' MIDDAY entry
 const RECEPTION_UNSTAFFED_MULTIPLIER := 1.6 # balance.json's stations.reception
-const BELLHOP_UNSTAFFED_DELAY_TICKS := 16 # balance.json's stations.bellhop
+const CHECKIN_DELAY_TICKS := 16 # balance.json's checkin.delay_ticks
 const SHELLY_CLEAN_TICKS := 16 # balance.json's stations.housekeeping, skill 5
 
 
@@ -42,18 +47,30 @@ func test_all_three_staffers_carry_a_skill_rating_at_every_station() -> void:
 	for id in ["biscuit", "marlon", "shelly"]:
 		assert_true(GameState.staffers.has(id))
 		var skills: Dictionary = GameState.staffers[id]["skills"]
-		for station_id in ["reception", "bellhop", "housekeeping", "kitchen"]:
+		for station_id in ["reception", "housekeeping", "kitchen"]:
 			assert_true(skills.has(station_id), "%s should have a %s skill" % [id, station_id])
 			assert_between(int(skills[station_id]), 1, 5)
+
+
+func test_the_hotel_runs_on_exactly_three_stations() -> void:
+	assert_eq(Station.IDS, ["reception", "housekeeping", "kitchen"])
+	assert_eq(Station.LABELS.keys(), Station.IDS, "every Station id should carry a display label")
+	assert_false(Station.is_valid("bellhop"), "Bellhop is gone as a Station (ADR-0019)")
 
 
 ## --- Assignment/reassignment ---
 
 func test_default_coverage_matches_the_reference_starting_assignment() -> void:
 	assert_eq(GameState.staffer_station("biscuit"), "reception")
-	assert_eq(GameState.staffer_station("marlon"), "bellhop")
 	assert_eq(GameState.staffer_station("shelly"), "housekeeping")
 	assert_true(GameState.station_staffers("kitchen").is_empty())
+	assert_eq(GameState.staffer_station("marlon"), "", "Bellhop's old default Staffer starts unassigned in the Staff Pool")
+
+
+func test_no_staffer_can_be_assigned_to_bellhop_anywhere() -> void:
+	assert_false(Sim.assign_staffer("marlon", "bellhop"))
+	assert_eq(GameState.staffer_station("marlon"), "", "a rejected assignment shouldn't move anyone")
+	assert_false(GameState.stations.has("bellhop"), "no Station vocabulary entry should survive either")
 
 
 func test_assign_staffer_moves_a_staffer_to_any_station_at_any_time() -> void:
@@ -116,23 +133,24 @@ func test_empty_reception_station_measurably_increases_patience_decay() -> void:
 	assert_eq(_party_by_id(999)["patience"], START_PATIENCE - DECAY_PER_TICK - DECAY_PER_TICK * RECEPTION_UNSTAFFED_MULTIPLIER)
 
 
-## ADR-0014/0017 inverted this: a staffed Bellhop now Escorts (a Skill-scaled
-## per-Staffer Job, see test_bellhop_escort.gd) rather than seating instantly,
-## while the unstaffed case's flat delay is unchanged.
-func test_empty_bellhop_station_measurably_slows_check_in_versus_staffed() -> void:
+## ADR-0019 removed the Bellhop Station and its Escort Job, so every seated
+## Party now walks to its Room on the one flat delay that used to be only
+## the unstaffed fallback -- no Station can speed it up or slow it down.
+func test_check_in_is_a_flat_delay_no_station_gates() -> void:
 	_inject_party(1, ["warm", "water"], 1)
-	Sim.seat_party(1, "lagoon_room", 0) # Bellhop staffed (Marlon) -- an Escort, not instant
-	var staffed_room := GameState.room_instance("lagoon_room", 0)
-	assert_true(staffed_room["checking_in"], "a staffed Bellhop should still Escort, not seat instantly")
+	Sim.seat_party(1, "lagoon_room", 0) # full default coverage
+	var room := GameState.room_instance("lagoon_room", 0)
+	assert_true(room["checking_in"], "a seated Party walks to its Room rather than landing in it instantly")
+	assert_eq(int(room["checkin_ticks_remaining"]), CHECKIN_DELAY_TICKS)
 
-	Sim.assign_staffer("marlon", "kitchen") # empty Bellhop
+	Sim.assign_staffer("biscuit", "kitchen") # every Station but Kitchen now empty
+	Sim.assign_staffer("shelly", "kitchen")
 	_inject_party(2, ["warm", "water"], 1)
 	Sim.seat_party(2, "lagoon_room", 1)
-	var unstaffed_room := GameState.room_instance("lagoon_room", 1)
-	assert_true(unstaffed_room["checking_in"], "an unstaffed Bellhop should delay check-in")
-	assert_eq(int(unstaffed_room["checkin_ticks_remaining"]), BELLHOP_UNSTAFFED_DELAY_TICKS)
+	assert_eq(int(GameState.room_instance("lagoon_room", 1)["checkin_ticks_remaining"]), CHECKIN_DELAY_TICKS, "staffing can't move the check-in delay either way")
 
-	Clock.force_advance_ticks(BELLHOP_UNSTAFFED_DELAY_TICKS)
+	Clock.force_advance_ticks(CHECKIN_DELAY_TICKS)
+	assert_false(GameState.room_instance("lagoon_room", 0)["checking_in"], "the delay should resolve on its own")
 	assert_false(GameState.room_instance("lagoon_room", 1)["checking_in"], "the delay should resolve on its own")
 
 

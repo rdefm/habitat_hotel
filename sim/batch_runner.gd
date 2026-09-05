@@ -31,11 +31,12 @@ const CSV_COLUMNS := [
 ## station_assignments is an optional staffer_id -> station_id override
 ## applied once, right after the reset, through Sim.assign_staffer() -- the
 ## same reassignment path the Roster UI uses (ticket 07/08), not a new one.
-## Defaults to {} (the reset's DEFAULT_STATION_ASSIGNMENTS is left as-is: only
-## Reception/Bellhop/Housekeeping covered, Kitchen empty), which is why an
-## existing caller that omits this argument sees no behavior change. A caller
-## that wants a batch run to actually exercise Dining -- e.g. the multi-day
-## integration check -- passes e.g. {"marlon": "kitchen"}.
+## Defaults to {} (the reset's DEFAULT_STATION_ASSIGNMENTS is left as-is:
+## only Reception/Housekeeping covered, Kitchen empty and Marlon in the
+## Staff Pool), which is why an existing caller that omits this argument
+## sees no behavior change. A caller that wants a batch run to actually
+## exercise Dining -- e.g. the multi-day integration check -- passes e.g.
+## {"marlon": "kitchen"}.
 static func run(days: int, csv_path: String = DEFAULT_CSV_PATH, seed_value: int = -1, station_assignments: Dictionary = {}) -> Array:
 	Rng.reset(seed_value) if seed_value >= 0 else Rng.reset()
 	Clock.reset()

@@ -55,12 +55,12 @@ class StafferCardButton extends Button:
 
 
 ## Shared by this file's own make_button() and ui/station_panel.gd's
-## compact actor tokens, so both stay in lockstep on the same "R#B#H#K#" and
+## compact actor tokens, so both stay in lockstep on the same "R#H#K#" and
 ## "(unassigned)" text instead of each keeping its own copy that can drift.
 static func skill_summary(staffer_id: String) -> String:
 	var skills: Dictionary = GameState.staffers[staffer_id]["skills"]
-	return "R%d B%d H%d K%d" % [
-		int(skills["reception"]), int(skills["bellhop"]), int(skills["housekeeping"]), int(skills["kitchen"]),
+	return "R%d H%d K%d" % [
+		int(skills["reception"]), int(skills["housekeeping"]), int(skills["kitchen"]),
 	]
 
 

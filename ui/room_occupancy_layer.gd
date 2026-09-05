@@ -5,13 +5,12 @@ extends Control
 ## fade-out stand-in guest_seated used to get from ui/lobby_view.gd into a
 ## real point-to-point walk from the Reception floor to the actual Room cell
 ## a seated Party landed on, plus a persistent guest actor standing in that
-## cell for the whole stay. lobby_view.gd's guest_seated handling (and its
-## matching decorative bellhop round-trip) is removed by this ticket in
-## favor of this file; turned-away/checked-out are covered by ticket 05
-## below, while room-dirty (a Housekeeping Staffer's own travel to and from
-## the dirty Room) is ui/staff_job_travel_layer.gd's job (ticket 09), which
-## replaced lobby_view.gd's old decorative, disconnected housekeeper
-## round-trip entirely.
+## cell for the whole stay. lobby_view.gd's guest_seated handling is removed
+## by this ticket in favor of this file; turned-away/checked-out are covered
+## by ticket 05 below, while room-dirty (a Housekeeping Staffer's own travel
+## to and from the dirty Room) is ui/staff_job_travel_layer.gd's job
+## (ticket 09), which replaced lobby_view.gd's old decorative, disconnected
+## housekeeper round-trip entirely.
 ##
 ## Ticket 05 extends this same overlay with the symmetric reverse trips:
 ## guest_checked_out walks a Room's persistent occupant actor back down to
@@ -40,17 +39,23 @@ extends Control
 ## player as "the guest is standing in the cell" even though it isn't
 ## literally that cell's scene-tree child.
 ##
-## Escort accompaniment (ADR-0014/0017): progress is driven by comparing each
-## tick's Sim.escort_job(staffer_id)["ticks_remaining"] against the value
-## first observed for that job, not a real-seconds Tween -- ticks already
-## pause/scale with Clock exactly the way the underlying Escort itself does,
-## so this can't drift out of sync with the sim the way a wall-clock tween
-## driving a pausable, speed-variable countdown would. The unstaffed flat
-## delay has no per-Staffer job to track progress against at all, so that
-## case idles the guest at Reception and only plays a fixed-duration walk
-## once checking_in actually resolves, matching the ticket's "plays after
-## that delay" (not stretched across it) wording -- and with no Bellhop
-## actor ever created, since escort_mode is false for that whole wait.
+## Check-in (ADR-0019): a seated guest idles at Reception for the flat
+## checkin.delay_ticks the Sim counts down, then plays a fixed-duration walk
+## into the Room once checking_in resolves -- the walk plays *after* that
+## delay rather than being stretched across it, since a flat countdown
+## carries no per-Staffer progress this layer could interpolate against.
+## The Bellhop-escorted variant this used to also handle (a second actor
+## walking the guest up, positioned from the Escort Job's own tick
+## countdown) went with the Station.
+##
+## That arrival walk needs _process() to keep its hands off the actor while
+## it runs: a Tween's property write lands *after* every node's _process()
+## in the same frame, so an occupant that _process() re-snaps to its cell
+## every frame would have the Tween re-capture that snapped position as its
+## own start value -- a walk from the cell to the cell, i.e. a teleport. An
+## occupant mid-arrival therefore carries an "arriving" flag the occupant
+## loop skips on, cleared by the Tween's own finish callback. It stays in
+## _occupants throughout so checkout and the re-seat guard still find it.
 
 const ActorStyle = preload("res://ui/actor_style.gd")
 const HotelPanel = preload("res://ui/hotel_panel.gd")
@@ -58,9 +63,7 @@ const ReceptionPanel = preload("res://ui/reception_panel.gd")
 const MatchHint = preload("res://sim/match_hint.gd")
 
 const ACTOR_SIZE := Vector2(36, 52)
-const GUEST_TRAVEL_OFFSET := Vector2(-14, 0)
-const BELLHOP_TRAVEL_OFFSET := Vector2(14, 0)
-const UNSTAFFED_WALK_DURATION := 0.8
+const CHECKIN_WALK_DURATION := 0.8
 const CHECKOUT_WALK_DURATION := 0.8
 const TURN_AWAY_WALK_DURATION := 0.8
 ## How far outside Reception's own rect the "entrance" a turned-away Party
@@ -75,8 +78,8 @@ const ENTRANCE_OFFSET_X := 80.0
 var hotel_panel: HotelPanel
 var reception_panel: ReceptionPanel
 
-## room_key -> {guest, bellhop (or null), staffer_id (or ""), initial_ticks,
-## room_type_id, instance_id} -- an in-flight walk-in not yet arrived.
+## room_key -> {guest, room_type_id, instance_id} -- a seated guest still
+## checking in, not yet arrived in their Room.
 var _walking: Dictionary = {}
 
 ## room_key -> {guest, room_type_id, instance_id} -- a Room's persistent
@@ -98,25 +101,23 @@ func _ready() -> void:
 ## position every rendered frame -- cheap for this game's room counts, and
 ## the only way to stay correct across scrolling and HotelPanel rebuilds
 ## alike without caching a Control reference refresh() could free. Also
-## keeps a still-waiting walker (parked at Reception -- either queued for a
-## free Bellhop, or sitting out the unstaffed flat delay) glued to
-## Reception's live position the same way; a walker already mid-Escort is
-## left alone here since _advance_escort() (tick-driven, not frame-driven)
-## owns its position for that stretch.
+## keeps a still-checking-in walker parked at (and glued to) Reception's
+## live position the same way, until _arrive() hands it to the tween that
+## walks it into its Room.
 func _process(_delta: float) -> void:
 	if hotel_panel == null:
 		return
 	for key in _occupants:
 		var occ: Dictionary = _occupants[key]
+		if occ.get("arriving", false):
+			continue # the arrival walk's Tween owns this actor -- see the class doc
 		var cell := hotel_panel.find_room_cell(occ["room_type_id"], occ["instance_id"])
 		if cell == null:
 			continue
 		occ["guest"].position = _to_local(cell.get_global_rect().get_center()) - ACTOR_SIZE / 2.0
 
 	for key in _walking:
-		var entry: Dictionary = _walking[key]
-		if entry["bellhop"] == null:
-			entry["guest"].position = _reception_anchor() - ACTOR_SIZE / 2.0
+		_walking[key]["guest"].position = _reception_anchor() - ACTOR_SIZE / 2.0
 
 
 func _on_guest_seated(guest_name: String, species_id: String, room_type_id: String, instance_id: int, mismatch: bool) -> void:
@@ -128,10 +129,7 @@ func _on_guest_seated(guest_name: String, species_id: String, room_type_id: Stri
 	guest.position = _reception_anchor() - ACTOR_SIZE / 2.0
 	add_child(guest)
 
-	_walking[key] = {
-		"guest": guest, "bellhop": null, "staffer_id": "", "initial_ticks": 1,
-		"room_type_id": room_type_id, "instance_id": instance_id,
-	}
+	_walking[key] = {"guest": guest, "room_type_id": room_type_id, "instance_id": instance_id}
 
 
 ## Fires exactly at checkout (see sim_controller.gd's _checkout_guest()),
@@ -205,78 +203,39 @@ func _advance_walk(key: String) -> void:
 		return
 
 	if room.get("checking_in", false):
-		if room.get("escort_mode", false):
-			_advance_escort(entry)
-		# unstaffed: idle at Reception until checking_in resolves -- nothing to animate yet
-		return
+		return # idle at Reception until checking_in resolves -- nothing to animate yet
 
 	_arrive(key, entry)
 
 
-## Staffed Bellhop branch: travel is driven by the claiming Staffer's own
-## Escort Job ticking down, not a real-seconds Tween -- see this file's
-## class doc for why.
-func _advance_escort(entry: Dictionary) -> void:
-	var staffers := Sim.escort_staffers(entry["room_type_id"], entry["instance_id"])
-	if staffers.is_empty():
-		if entry["bellhop"] != null:
-			entry["bellhop"].queue_free()
-			entry["bellhop"] = null
-			entry["staffer_id"] = ""
-		return # still waiting for a free Bellhop -- guest stays parked at Reception
-
-	var staffer_id: String = staffers[0]
-	var ticks_remaining := int(Sim.escort_job(staffer_id).get("ticks_remaining", 0))
-	if entry["staffer_id"] != staffer_id:
-		entry["staffer_id"] = staffer_id
-		entry["initial_ticks"] = maxi(1, ticks_remaining)
-		if entry["bellhop"] == null:
-			entry["bellhop"] = _make_bellhop(staffer_id)
-			add_child(entry["bellhop"])
+func _arrive(key: String, entry: Dictionary) -> void:
+	var guest: Control = entry["guest"]
+	_walking.erase(key)
+	var occupant := {
+		"guest": guest, "room_type_id": entry["room_type_id"],
+		"instance_id": entry["instance_id"], "arriving": false,
+	}
+	_occupants[key] = occupant
 
 	var cell := hotel_panel.find_room_cell(entry["room_type_id"], entry["instance_id"]) if hotel_panel != null else null
 	if cell == null:
-		return
+		return # leave the guest where it is -- the occupant loop snaps it to
+		# the real cell the moment find_room_cell() finds one.
 
-	var fraction := clampf(1.0 - (float(ticks_remaining) / float(entry["initial_ticks"])), 0.0, 1.0)
-	var from := _reception_anchor()
-	var to := _to_local(cell.get_global_rect().get_center())
-	var pos := from.lerp(to, fraction)
-	entry["guest"].position = pos + GUEST_TRAVEL_OFFSET - ACTOR_SIZE / 2.0
-	entry["bellhop"].position = pos + BELLHOP_TRAVEL_OFFSET - ACTOR_SIZE / 2.0
-
-
-func _arrive(key: String, entry: Dictionary) -> void:
-	if entry["bellhop"] != null:
-		entry["bellhop"].queue_free()
-
-	var guest: Control = entry["guest"]
-	var cell := hotel_panel.find_room_cell(entry["room_type_id"], entry["instance_id"]) if hotel_panel != null else null
-	if cell != null:
-		var target := _to_local(cell.get_global_rect().get_center()) - ACTOR_SIZE / 2.0
-		if entry["staffer_id"] == "": # unstaffed: no stretched travel happened yet -- play the walk now
-			var tween := create_tween()
-			tween.tween_property(guest, "position", target, UNSTAFFED_WALK_DURATION)
-		else:
-			guest.position = target
-	# else: leave the guest wherever it was -- _process's occupant loop will
-	# snap it to the real cell the moment find_room_cell() finds one.
-
-	_walking.erase(key)
-	_occupants[key] = {"guest": guest, "room_type_id": entry["room_type_id"], "instance_id": entry["instance_id"]}
+	occupant["arriving"] = true
+	var target := _to_local(cell.get_global_rect().get_center()) - ACTOR_SIZE / 2.0
+	var tween := create_tween()
+	tween.tween_property(guest, "position", target, CHECKIN_WALK_DURATION)
+	tween.tween_callback(func() -> void: occupant["arriving"] = false)
 
 
 func _cancel_walk(key: String) -> void:
-	var entry: Dictionary = _walking[key]
-	entry["guest"].queue_free()
-	if entry["bellhop"] != null:
-		entry["bellhop"].queue_free()
+	_walking[key]["guest"].queue_free()
 	_walking.erase(key)
 
 
-## Reuses sim_controller.gd's own room-addressing key (also what
-## Sim.escort_staffers() keys off internally) rather than inventing a second
-## room_type_id+instance_id format.
+## Reuses sim_controller.gd's own room-addressing key rather than inventing
+## a second room_type_id+instance_id format.
 func _room_key(room_type_id: String, instance_id: int) -> String:
 	return MatchHint.room_key({"room_type_id": room_type_id, "instance_id": instance_id})
 
@@ -311,14 +270,6 @@ func _make_turned_away_guest(guest_name: String, species_id: String, reason: Str
 	var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
 	var token := _make_token(species_name.left(3), Color(0.85, 0.4, 0.4))
 	token.tooltip_text = "%s the %s -- turned away (%s)" % [guest_name, species_name, reason]
-	return token
-
-
-func _make_bellhop(staffer_id: String) -> Control:
-	var staffer: Dictionary = GameState.staffers.get(staffer_id, {})
-	var staffer_name: String = String(staffer.get("name", staffer_id))
-	var token := _make_token(staffer_name.left(3), Color(0.85, 0.7, 0.4))
-	token.tooltip_text = "%s -- escorting a guest to their Room" % staffer_name
 	return token
 
 

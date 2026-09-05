@@ -1,8 +1,8 @@
 class_name StationPanel
 extends VBoxContainer
 
-## Reception/Bellhop/Housekeeping Station slots, always visible near
-## Reception (ticket 04, ADR-0009) -- relocated out of the Roster menu,
+## Reception/Housekeeping Station slots, always visible near Reception
+## (ticket 04, ADR-0009) -- relocated out of the Roster menu,
 ## which no longer does Station assignment at all now that ticket 05 moved
 ## Kitchen onto the Terrace's modal too (ui/terrace_menu.gd); the Roster
 ## menu is retired entirely in ticket 06. Tap a Staffer actor then a Station
@@ -13,17 +13,17 @@ extends VBoxContainer
 ##
 ## main_screen.gd calls refresh() when the generic overlay closes, since a
 ## Kitchen (re)assignment made there (still routed through Sim.assign_staffer())
-## can move a Staffer off one of these three Stations without this panel's
-## own taps ever firing.
+## can move a Staffer off one of these Stations without this panel's own
+## taps ever firing.
 ##
 ## Tapping a Staffer actor still toggles selection for the tap-Station-to-
 ## assign gesture above, and now also emits staffer_tapped so main_screen can
 ## open the bespoke detail popup (ticket 06, ADR-0011) -- replacing the
 ## retired ui/roster_menu.gd as the place to see a Staffer's Skill/Traits.
 ##
-## Actor reskin + Staff Pool (ticket 03, ADR-0016): each of the three
-## Stations is now a zone -- StationCard's existing drop-target/tap-to-assign
-## button (unchanged, still shared with terrace_menu.gd) plus a row of
+## Actor reskin + Staff Pool (ticket 03, ADR-0016): each of these Stations
+## is now a zone -- StationCard's existing drop-target/tap-to-assign button
+## (unchanged, still shared with terrace_menu.gd) plus a row of
 ## compact standing tokens for its currently-assigned Staffers, built by
 ## _make_actor() below. Every Staffer with no Station at all
 ## (GameState.staffer_station() == "") renders the same way in a new Staff
@@ -49,7 +49,10 @@ const StafferCard = preload("res://ui/staffer_card.gd")
 const StationCard = preload("res://ui/station_card.gd")
 const ActorStyle = preload("res://ui/actor_style.gd")
 
-const STATION_IDS := ["reception", "bellhop", "housekeeping"]
+## The Stations this panel shows: every Station except Kitchen, which
+## ticket 05 moved onto the Terrace's own modal (ui/terrace_menu.gd).
+## Bellhop was a third card here until ADR-0019 removed the Station.
+const STATION_IDS := ["reception", "housekeeping"]
 const ACTOR_MIN_SIZE := Vector2(40, 56)
 
 ## Emitted whenever a Staffer actor is tapped, selected or not, so

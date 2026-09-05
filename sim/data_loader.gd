@@ -313,8 +313,9 @@ const BALANCE_REQUIRED_SECTIONS := {
 	"demand": ["base_min", "base_max", "reputation_weight_min", "reputation_weight_max"],
 	"costs": ["staff_wage_per_day"],
 	"patience": ["start", "decay_per_tick"],
+	"checkin": ["delay_ticks"],
 	"pricing": ["min_multiplier", "max_multiplier", "step", "default_multiplier", "tolerance"],
-	"stations": ["reception", "bellhop", "housekeeping"],
+	"stations": ["reception", "housekeeping"],
 }
 
 
