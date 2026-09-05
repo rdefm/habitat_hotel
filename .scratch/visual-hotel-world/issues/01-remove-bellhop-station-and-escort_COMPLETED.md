@@ -8,11 +8,11 @@ The removal is total — the Station enum entry, the Escort Job and its claim/ti
 
 **Status:** ready-for-agent
 
-- [ ] No Staffer can be assigned to Bellhop anywhere in the game; the Station no longer exists in the Station vocabulary or in per-Staffer Skill data
-- [ ] A seated Party reaches its Room on the existing unstaffed path, at the existing flat delay, with no escorted branch remaining
-- [ ] Escort Job state, claiming, ticking and resolution are gone from `SimController`, with no dead branches left behind
-- [ ] Bellhop tuning is removed from `data/balance.json` and Bellhop Skill entries from `data/staffers.json`
-- [ ] `tests/test_bellhop_escort.gd` is deleted and every remaining test passes, including the Station-count and Stacking assertions that referenced Bellhop
-- [ ] `CONTEXT.md`'s **Escort** entry is removed and its **Station**, **Job** and **Stacking** entries no longer name Bellhop
-- [ ] A new ADR supersedes ADR-0014 and ADR-0017, and both are marked superseded
-- [ ] The old Control view still runs and is playable with three Stations
+- [x] No Staffer can be assigned to Bellhop anywhere in the game; the Station no longer exists in the Station vocabulary or in per-Staffer Skill data
+- [x] A seated Party reaches its Room on the existing unstaffed path, at the existing flat delay, with no escorted branch remaining
+- [x] Escort Job state, claiming, ticking and resolution are gone from `SimController`, with no dead branches left behind
+- [x] Bellhop tuning is removed from `data/balance.json` and Bellhop Skill entries from `data/staffers.json`
+- [x] `tests/test_bellhop_escort.gd` is deleted and every remaining test passes, including the Station-count and Stacking assertions that referenced Bellhop
+- [x] `CONTEXT.md`'s **Escort** entry is removed and its **Station**, **Job** and **Stacking** entries no longer name Bellhop
+- [x] A new ADR supersedes ADR-0014 and ADR-0017, and both are marked superseded
+- [x] The old Control view still runs and is playable with three Stations
