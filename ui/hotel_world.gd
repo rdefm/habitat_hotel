@@ -9,12 +9,15 @@ extends Node2D
 ##
 ## Framed by a Camera2D that defaults to fit-all, pans on drag, zooms on
 ## scroll/pinch within clamped bounds, and can be eased back to fit-all via
-## ease_to_fit_all() (wired to a HUD button by main_screen.gd). Interior bay
-## content (guests, staff, Build Slots, the elevator) is later tickets'
-## job -- this ticket only draws the shell, the floor signs, and the sky.
+## ease_to_fit_all() (wired to a HUD button by main_screen.gd). Ticket 07
+## adds the three Station posts and every Staffer standing at one or in the
+## staff nook; interior bay content (guests, Build Slots, the elevator) is
+## still later tickets' job.
 
 const BuildingLayout = preload("res://sim/building_layout.gd")
 const CharacterSprite = preload("res://ui/character_sprite.gd")
+const StafferActor = preload("res://ui/staffer_actor.gd")
+const Station = preload("res://sim/station.gd")
 
 ## Most-zoomed-in Camera2D.zoom value this world allows. Confirmed
 ## empirically against this project's canvas_items+expand stretch setup
@@ -27,6 +30,22 @@ const CharacterSprite = preload("res://ui/character_sprite.gd")
 const MAX_ZOOM := 3.0
 const ZOOM_STEP := 1.1
 const FIT_ALL_EASE_SECONDS := 0.4
+
+## How far the pointer must move between press and release, in world units,
+## before a Staffer pick-up counts as a drag rather than a tap -- below this
+## it's a tap (opens the detail popup), at or above it it's a drag (drop
+## against a Station post to (re)assign, or a no-op if released elsewhere).
+const STAFFER_DRAG_THRESHOLD := 6.0
+
+## Generous drop-target box around a Station post's single anchor point
+## (larger than the post's own STATION_PROP_SIZE render footprint) so a
+## dropped Staffer doesn't have to land pixel-perfect on the prop.
+const STATION_POST_HIT_SIZE := Vector2(60.0, 60.0)
+
+## Emitted whenever a Staffer is tapped (a press/release with no drag) so
+## main_screen can open their existing Skill/Trait detail popup -- same
+## contract as ui/station_panel.gd's retired staffer_tapped signal.
+signal staffer_tapped(staffer_id: String)
 
 ## Sky tint per Clock.Phase (autoload/clock.gd), keyed by the enum's plain
 ## int value (MORNING=0, MIDDAY=1, EVENING=2, NIGHT=3) rather than the enum
@@ -49,6 +68,22 @@ var _cached_floor_count := -1
 var _fit_all_zoom := 1.0
 
 var _dragging := false
+
+## Ticket 07: Station posts (station_id -> world Rect2 drop-target) and
+## Staffer actors (staffer_id -> StafferActor), rebuilt whenever
+## GameState.stations changes -- see _process()'s signature check below.
+var _station_post_rects: Dictionary = {}
+var _staffer_actors: Dictionary = {}
+var _cached_stations_signature := ""
+
+## Non-empty while a Staffer is picked up (press landed on a StafferActor's
+## hit_rect()) -- the id being dragged, its press-time world position (for
+## the tap-vs-drag threshold), and a semi-transparent ghost sprite
+## following the pointer. Mutually exclusive with _dragging (camera pan):
+## a press either starts one or the other, never both.
+var _drag_staffer_id := ""
+var _drag_start_world := Vector2.ZERO
+var _drag_preview: CharacterSprite = null
 
 
 func _ready() -> void:
@@ -86,6 +121,16 @@ func _process(_delta: float) -> void:
 		_cached_floor_count = floor_count
 		_rebuild_building()
 		ease_to_fit_all()
+		return
+
+	## Reception/Terrace never move when a Room floor unlocks (they're
+	## always floors()'s first two entries), so a Station (re)assignment --
+	## the only thing that changes who stands at a post/nook -- only needs
+	## to rebuild the Staffer actors, not the whole shell above.
+	var stations_signature := str(GameState.stations)
+	if stations_signature != _cached_stations_signature:
+		_cached_stations_signature = stations_signature
+		_rebuild_staffers(BuildingLayout.floors(GameState.rooms, GameState.stars))
 
 
 ## --- Building composition ---
@@ -108,7 +153,9 @@ func _rebuild_building() -> void:
 	roof.position = Vector2(0, roof_bottom_y - BuildingLayout.ROOF_HEIGHT)
 	_building.add_child(roof)
 
-	_spawn_manny(floors)
+	_rebuild_station_posts(floors)
+	_rebuild_staffers(floors)
+	_cached_stations_signature = str(GameState.stations)
 
 	_fit_all_zoom = _fit_zoom(BuildingLayout.fit_all_bounds(floors))
 
@@ -200,30 +247,115 @@ func _add_floor_sign(sign_text: String, top_y: float) -> void:
 	_building.add_child(label)
 
 
-## --- Manny (ticket 06, ADR-0015) ---
+## --- Station posts and Staffer placement (ticket 07) ---
 ##
-## Manny is the asset contract's reference implementation: his existing
-## walk sheet loads through resolve_character_sprite() exactly like any
-## other Staffer's would, proving the same resolver that falls back to a
-## placeholder for everyone else also renders a real animated sprite at
-## its contract footprint. "Standing somewhere in the world and moving"
-## (the ticket's own words) is his animated walk-cycle playing in place,
-## not a scripted patrol -- there is no wander behaviour and no ambient
-## behaviour scheduler (spec.md, Out of Scope). Placed at Reception's
-## staff nook, where Station.gd's Staff Pool -- Manny's real starting
-## state -- already loiters; real Station-post assignment and its
-## rendering, which would be what actually moves him, is ticket 07's job.
-## His "working" (sweep) alias resolves and renders through this exact
-## same path, verified directly rather than reproduced here: there's no
-## real Job driving which state should show until ticket 07/08 exist.
-func _spawn_manny(floors: Array) -> void:
-	var nook: Vector2 = BuildingLayout.resolve_anchor(floors, 0, "staff_nook")
+## Each Station is a physical post: a CharacterSprite rendering
+## resolve_station_prop()'s prop/placeholder at the anchor
+## resolve_station_post_anchor() names (front_desk, supply_closet, or the
+## Terrace's kitchen_pass -- ADR-0010 unchanged). A Station's staffing
+## level is meant to be readable from who's standing there, so no tap
+## behaviour lives on the post itself here -- only the drop-target rect
+## _unhandled_input checks a Staffer drag's release against.
+func _rebuild_station_posts(floors: Array) -> void:
+	_station_post_rects.clear()
+	for station_id in Station.IDS:
+		var post: Vector2 = BuildingLayout.resolve_station_post_anchor(floors, station_id)
+		var prop := CharacterSprite.new()
+		_building.add_child(prop)
+		prop.configure(BuildingLayout.resolve_station_prop(station_id))
+		prop.position = post
+		_station_post_rects[station_id] = Rect2(post - STATION_POST_HIT_SIZE / 2.0, STATION_POST_HIT_SIZE)
 
-	var resolved := BuildingLayout.resolve_character_sprite("staffer", "manny", "walk")
-	var manny := CharacterSprite.new()
-	_building.add_child(manny)
-	manny.configure(resolved)
-	manny.position = nook
+
+## Every Staffer, standing at their Station's post if assigned or the staff
+## nook if not (sim/building_layout.gd's staffer_placements(), ticket 07)
+## -- replaces ticket 06's hardcoded _spawn_manny() with the same
+## resolve_character_sprite("staffer", id, "idle") path for every Staffer,
+## Manny included: he has no idle sheet, so he now renders his placeholder
+## like anyone else's rest state would, rather than being special-cased
+## into his walk-cycle demo -- nothing yet drives a "working" state (that's
+## tickets 08/13's Job travel). Called on structural rebuilds and whenever
+## GameState.stations changes (see _process()), never mid-drag: the
+## Staffer actually being dragged is only ever moved by our own
+## Sim.assign_staffer() call at drop, which happens after the drag has
+## already ended.
+func _rebuild_staffers(floors: Array) -> void:
+	for actor in _staffer_actors.values():
+		actor.queue_free()
+	_staffer_actors.clear()
+
+	var placements := BuildingLayout.staffer_placements(GameState.stations, GameState.staffers.keys())
+	for staffer_id in placements.keys():
+		var point: Vector2 = BuildingLayout.resolve_staffer_point(floors, placements[staffer_id])
+		var actor := StafferActor.new()
+		_building.add_child(actor)
+		actor.configure(staffer_id)
+		actor.position = point
+		_staffer_actors[staffer_id] = actor
+
+
+## --- Staffer tap/drag (ticket 07) ---
+##
+## Hand-rolled against world-space hit rects rather than Godot's Control-
+## only _get_drag_data()/_can_drop_data() API (spec.md: "a thin invisible
+## Control in front of the art, or an Area2D with hand-rolled drag,
+## whichever is cheaper") -- posts and actors already know their own world
+## position, so comparing a press/release point against their rects is
+## cheaper here than re-deriving screen-space Control rects every frame,
+## which is exactly the pattern this rewrite replaces (spec.md's Problem
+## Statement).
+
+func _staffer_at(world_pos: Vector2) -> String:
+	for staffer_id in _staffer_actors.keys():
+		var actor: StafferActor = _staffer_actors[staffer_id]
+		if actor.hit_rect().has_point(world_pos):
+			return staffer_id
+	return ""
+
+
+func _station_post_at(world_pos: Vector2) -> String:
+	for station_id in _station_post_rects.keys():
+		if _station_post_rects[station_id].has_point(world_pos):
+			return station_id
+	return ""
+
+
+func _begin_staffer_drag(staffer_id: String, world_pos: Vector2) -> void:
+	_drag_staffer_id = staffer_id
+	_drag_start_world = world_pos
+	_drag_preview = CharacterSprite.new()
+	add_child(_drag_preview)
+	_drag_preview.configure(BuildingLayout.resolve_character_sprite("staffer", staffer_id, "idle"))
+	_drag_preview.modulate.a = 0.7
+	_drag_preview.position = world_pos
+
+
+func _update_staffer_drag(world_pos: Vector2) -> void:
+	if _drag_preview != null:
+		_drag_preview.position = world_pos
+
+
+## Ends the in-progress Staffer drag/tap: assigns via the existing
+## Sim.assign_staffer() path (the same reassignment/interruption semantics
+## ui/station_card.gd's drop handling already used) if the release moved
+## past the drag threshold and landed on a post, emits staffer_tapped if it
+## didn't move (a tap), and otherwise leaves the Staffer where they were --
+## no explicit "unassign" gesture exists, matching the old Control view.
+func _end_staffer_drag(world_pos: Vector2) -> void:
+	var staffer_id := _drag_staffer_id
+	var moved := world_pos.distance_to(_drag_start_world) >= STAFFER_DRAG_THRESHOLD
+
+	_drag_staffer_id = ""
+	if _drag_preview != null:
+		_drag_preview.queue_free()
+		_drag_preview = null
+
+	if moved:
+		var station_id := _station_post_at(world_pos)
+		if station_id != "":
+			Sim.assign_staffer(staffer_id, station_id)
+	else:
+		staffer_tapped.emit(staffer_id)
 
 
 func _make_sprite(filename: String) -> Sprite2D:
@@ -298,16 +430,48 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
 			_zoom_by(1.0 / ZOOM_STEP)
 		elif event.button_index == MOUSE_BUTTON_LEFT:
-			_dragging = event.pressed
-	elif event is InputEventMouseMotion and _dragging:
-		_pan_by(event.relative)
+			if event.pressed:
+				_on_press(get_global_mouse_position())
+			else:
+				_on_release(get_global_mouse_position())
+	elif event is InputEventMouseMotion:
+		if _drag_staffer_id != "":
+			_update_staffer_drag(get_global_mouse_position())
+		elif _dragging:
+			_pan_by(event.relative)
 	elif event is InputEventMagnifyGesture:
 		## factor > 1 is a pinch-out (fingers spreading -- "zoom in" intent),
 		## which under this project's confirmed zoom convention means
 		## multiplying zoom UP, not down.
 		_zoom_by(event.factor)
+	elif event is InputEventScreenTouch:
+		if event.pressed:
+			_on_press(get_global_mouse_position())
+		else:
+			_on_release(get_global_mouse_position())
 	elif event is InputEventScreenDrag:
-		_pan_by(event.relative)
+		if _drag_staffer_id != "":
+			_update_staffer_drag(get_global_mouse_position())
+		else:
+			_pan_by(event.relative)
+
+
+## Shared press handler for a mouse-left-button or touch-down event: if it
+## landed on a Staffer, that starts a Staffer drag/tap instead of a camera
+## pan (see the header comment above _staffer_at()).
+func _on_press(world_pos: Vector2) -> void:
+	var staffer_id := _staffer_at(world_pos)
+	if staffer_id != "":
+		_begin_staffer_drag(staffer_id, world_pos)
+	else:
+		_dragging = true
+
+
+func _on_release(world_pos: Vector2) -> void:
+	if _drag_staffer_id != "":
+		_end_staffer_drag(world_pos)
+	else:
+		_dragging = false
 
 
 func _zoom_by(factor: float) -> void:

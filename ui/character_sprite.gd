@@ -12,16 +12,25 @@ extends Node2D
 ## center -- "standing on" the anchor it's placed at, matching how the
 ## anchor registry treats e.g. elevator_door as a floor-level point rather
 ## than a band-top point.
+##
+## A resolved "sprite" dict carries "frame_width"/"frame_height" only when
+## it came from resolve_character_sprite() (an animated sheet to slice); the
+## four single-frame resolvers (tag icon, mood face, Station prop, HUD
+## pill -- first rendered live by ticket 07's Station posts) hand back a
+## "sprite" dict with no frame size at all, since there's only ever one
+## frame to show. _add_sprite()/_add_static_sprite() are that split.
 
 func configure(resolved: Dictionary, fps: float = 8.0) -> void:
 	for child in get_children():
 		child.queue_free()
 
 	var size: Vector2 = resolved["size"]
-	if resolved["kind"] == "sprite":
+	if resolved["kind"] != "sprite":
+		_add_placeholder(resolved, size)
+	elif resolved.has("frame_width"):
 		_add_sprite(resolved, size, fps)
 	else:
-		_add_placeholder(resolved, size)
+		_add_static_sprite(resolved, size)
 
 
 func _add_sprite(resolved: Dictionary, size: Vector2, fps: float) -> void:
@@ -49,6 +58,21 @@ func _add_sprite(resolved: Dictionary, size: Vector2, fps: float) -> void:
 	sprite.scale = Vector2(size.x / frame_width, size.y / frame_height)
 	add_child(sprite)
 	sprite.play("play")
+
+
+## A single static frame, no slicing -- the whole loaded texture scaled to
+## the slot's contract footprint, same bottom-center origin convention as
+## _add_sprite()'s AnimatedSprite2D.
+func _add_static_sprite(resolved: Dictionary, size: Vector2) -> void:
+	var texture: Texture2D = load(String(resolved["file"]))
+
+	var sprite := Sprite2D.new()
+	sprite.texture = texture
+	sprite.centered = true
+	sprite.position = Vector2(0, -size.y / 2.0)
+	if texture != null and texture.get_width() > 0 and texture.get_height() > 0:
+		sprite.scale = Vector2(size.x / texture.get_width(), size.y / texture.get_height())
+	add_child(sprite)
 
 
 func _add_placeholder(resolved: Dictionary, size: Vector2) -> void:

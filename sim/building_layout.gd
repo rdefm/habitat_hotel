@@ -245,6 +245,11 @@ const TERRACE_DINER_GRID_ORIGIN := Vector2(INTERIOR_LEFT + 60.0, 50.0)
 const TERRACE_DINER_GRID_SPACING := Vector2(120.0, 70.0)
 const TERRACE_DINER_GRID_COLUMNS := 2
 
+## Kitchen's Station post (ticket 07) -- ADR-0010's "Kitchen is the Terrace
+## pass" placed away from the diner grid and entrance queue lines above so
+## none of the three collide.
+const TERRACE_KITCHEN_PASS_LOCAL := Vector2(INTERIOR_LEFT + 292.0, 30.0)
+
 
 ## Local-space rect for a Room floor's bay 0 (left) or bay 1 (right),
 ## spanning the floor's own full height -- so a shorter painted floor
@@ -294,6 +299,9 @@ static func _named_anchor_local(kind: String, name: String, height: float) -> Va
 			return SUPPLY_CLOSET_LOCAL
 		if name == "staff_nook":
 			return STAFF_NOOK_LOCAL
+	elif kind == "terrace":
+		if name == "kitchen_pass":
+			return TERRACE_KITCHEN_PASS_LOCAL
 	return null
 
 
@@ -335,6 +343,108 @@ static func _resolve_local_point(floors_bottom_to_top: Array, i: int, local: Vec
 ## meets its anchors.
 static func _floor_top_y(floors_bottom_to_top: Array, i: int) -> float:
 	return floor_bottom_y(floors_bottom_to_top, i) - float(floors_bottom_to_top[i]["height"])
+
+
+## --- Station posts and Staffer placement bucketing (ticket 07) ---
+##
+## Each of the three Stations (sim/station.gd's Station.IDS) is a physical
+## post: Reception and Housekeeping's posts sit in the Reception band
+## (front_desk/supply_closet, the anchor registry above); Kitchen's is the
+## Terrace pass upstairs (ADR-0010 unchanged). Reception and Terrace are
+## always floors_bottom_to_top's first two entries -- floors()'s own fixed
+## ordering, never reordered by an unlock -- so the floor index each
+## Station's post lives on is a hardcoded 0/1 below, not derived per call.
+
+const STATION_POST_FLOOR_INDEX := {
+	"reception": 0,
+	"housekeeping": 0,
+	"kitchen": 1,
+}
+const STATION_POST_ANCHOR_NAME := {
+	"reception": "front_desk",
+	"housekeeping": "supply_closet",
+	"kitchen": "kitchen_pass",
+}
+
+
+## World position of station_id's physical post. Unknown station_id is a
+## programming error -- every caller sources ids from Station.IDS -- left
+## unguarded on purpose: the Dictionary lookups below log a script error and
+## degrade to a garbage Vector2 rather than silently returning a plausible
+## default, so a caller passing a bad id is loud in the console instead of
+## quietly misplacing a Staffer.
+static func resolve_station_post_anchor(floors_bottom_to_top: Array, station_id: String) -> Vector2:
+	var floor_index: int = int(STATION_POST_FLOOR_INDEX[station_id])
+	var anchor_name: String = String(STATION_POST_ANCHOR_NAME[station_id])
+	return resolve_anchor(floors_bottom_to_top, floor_index, anchor_name)
+
+
+## Where every Staffer stands: at their Station's post (bucket
+## "post:<station_id>") if assigned, or the staff nook (bucket "nook") if
+## not -- ADR-0005/CONTEXT.md's Staff Pool. More than one Staffer can share
+## a post or the nook at once (a Station holds a list, not a single slot),
+## so each bucket's members are stacked side by side off
+## STAFFER_STACK_OFFSET by a stable index.
+const STAFFER_STACK_OFFSET := Vector2(22.0, 0.0)
+
+## Shared by staffer_bucket() (encode) and resolve_staffer_point() (decode)
+## so the "post:<station_id>" bucket shape is defined once rather than the
+## prefix and its length being duplicated at each end of the round-trip.
+const POST_BUCKET_PREFIX := "post:"
+
+
+static func staffer_bucket(station_id: String) -> String:
+	return POST_BUCKET_PREFIX + station_id if station_id != "" else "nook"
+
+
+## Every known Staffer's placement -- {bucket: String, index: int} keyed by
+## staffer_id. `stations` is GameState.stations (station_id -> Array of
+## assigned staffer ids); `all_staffer_ids` is every known Staffer id
+## (GameState.staffers.keys()) so an unassigned Staffer -- absent from every
+## Station's list -- is found by elimination rather than needing its own
+## registry. Deterministic: each bucket's members are sorted alphabetically
+## before indices are assigned, so a redraw with unchanged staffing always
+## renders in the same order.
+static func staffer_placements(stations: Dictionary, all_staffer_ids: Array) -> Dictionary:
+	var buckets: Dictionary = {}
+	var assigned: Dictionary = {}
+	for station_id in stations.keys():
+		var ids: Array = (stations[station_id] as Array).duplicate()
+		ids.sort()
+		buckets[staffer_bucket(station_id)] = ids
+		for staffer_id in ids:
+			assigned[staffer_id] = true
+
+	var nook_ids: Array = []
+	for staffer_id in all_staffer_ids:
+		if not assigned.has(staffer_id):
+			nook_ids.append(staffer_id)
+	nook_ids.sort()
+	buckets["nook"] = nook_ids
+
+	var out: Dictionary = {}
+	for bucket in buckets.keys():
+		var ids: Array = buckets[bucket]
+		for i in range(ids.size()):
+			out[ids[i]] = {"bucket": bucket, "index": i}
+	return out
+
+
+## World position for a Staffer's placement (as returned by
+## staffer_placements() above): the bucket's single anchor point --
+## resolve_station_post_anchor() for a "post:<id>" bucket, the staff nook's
+## anchor for "nook" -- offset by STAFFER_STACK_OFFSET*index so multiple
+## Staffers at the same post/nook stand side by side instead of
+## overlapping.
+static func resolve_staffer_point(floors_bottom_to_top: Array, placement: Dictionary) -> Vector2:
+	var bucket: String = String(placement["bucket"])
+	var index: int = int(placement["index"])
+	var anchor: Vector2
+	if bucket == "nook":
+		anchor = resolve_anchor(floors_bottom_to_top, 0, "staff_nook")
+	else:
+		anchor = resolve_station_post_anchor(floors_bottom_to_top, bucket.substr(POST_BUCKET_PREFIX.length()))
+	return anchor + STAFFER_STACK_OFFSET * float(index)
 
 
 ## --- Character and interface slots (ticket 06) ---

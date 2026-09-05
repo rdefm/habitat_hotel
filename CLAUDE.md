@@ -1,3 +1,7 @@
+## Before exploring the codebase
+
+Read `sitemap.md` first to identify exactly which files are relevant to the change at hand, instead of searching the whole codebase.
+
 ## Agent skills
 
 ### Issue tracker

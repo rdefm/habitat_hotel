@@ -1,6 +1,6 @@
 # Asset contract
 
-Where everything in the drawn hotel world (`ui/hotel_world.gd` and its successors) goes, so art can be produced against a fixed target and dropped in without touching code. Started by ticket 04 (ADR-0020), covering only the building-shell slots that ticket's renderer consumes; ticket 05 extends this document with the full anchor registry (standing positions within each band), the per-Room-type interior assignment and its placeholder fallback, and the Reception/Terrace bands' own anchors. Ticket 06 does the same for character slots.
+Where everything in the drawn hotel world (`ui/hotel_world.gd` and its successors) goes, so art can be produced against a fixed target and dropped in without touching code. Started by ticket 04 (ADR-0020), covering only the building-shell slots that ticket's renderer consumes; ticket 05 extends this document with the full anchor registry (standing positions within each band), the per-Room-type interior assignment and its placeholder fallback, and the Reception/Terrace bands' own anchors. Ticket 06 does the same for character slots. Ticket 07 adds the Terrace's `kitchen_pass` anchor and is the first ticket to render any of it live — the three Station posts and every Staffer standing at one or in the staff nook.
 
 **Fallback rule (states now, applies everywhere in this contract):** a missing asset renders a placeholder occupying the identical footprint, tinted and labelled. Resolution lives in the layout model (`sim/building_layout.gd`) — the renderer never checks whether a file exists on disk; it only `load()`s whatever path the model hands it. For the Room interior slot, resolution checks two things in order: `ROOM_TYPE_INTERIOR_FILE`, a one-time alias for the three Room types ticket 03 already painted under a non-conventional name (see below), and then a naming convention every *other* Room type gets for free — `room_interior_<room_type_id>.png` under `assets/hotel_shell/`. That means dropping a correctly-named, correctly-sized file into that folder for *any* Room type, including the three on the fallback today, flips it to painted with no code change: the convention is open-ended, not a closed table that needs a new row per type.
 
@@ -85,6 +85,7 @@ Every band shares the same x-range for its frame columns, elevator shaft and int
 | --- | --- | --- |
 | `diner_spots` (grid) | `(228 + 120·col, 50 + 70·row)`, `col = n % 2`, `row = n / 2` | Table positions for seated diners. |
 | `entrance_queue` (line) | `(188 + 40·n, 150)` for `n = 0, 1, 2, …` | Waiting diners queueing at the Terrace entrance — a separate line from the lobby queue so the two never collide. |
+| `kitchen_pass` (ticket 07) | `(460, 30)` | Kitchen's Station post (ADR-0010: the Terrace pass, not a Ground Floor post like Reception/Housekeeping). Placed away from the diner grid and entrance queue above so none of the three collide. |
 
 ### Room floor (any Room type, painted or placeholder)
 
@@ -128,3 +129,11 @@ Mood faces are named after `PatienceState.tier()`'s actual return values (`calm`
 ### `character_idle.png`/`.webp` and the two UUID-named PNGs
 
 Unused leftovers with no code ever referencing them, predating this contract. Removed rather than left unreferenced — they get no slot.
+
+## Station posts and Staffer placement (ticket 07)
+
+The first slots this contract renders live rather than resolver-and-test-only: `ui/hotel_world.gd` draws each of the three Station props (previous section) at the anchor `sim/building_layout.gd`'s `resolve_station_post_anchor()` names — `front_desk`/`supply_closet` on the Reception band, `kitchen_pass` on the Terrace band (the anchor registry above) — and stands every Staffer at their placement via `staffer_placements()`/`resolve_staffer_point()`: at their Station's post if assigned, or the `staff_nook` if not (CONTEXT.md's Staff Pool). More than one Staffer at the same post or the nook stacks side by side off `BuildingLayout.STAFFER_STACK_OFFSET`, sorted alphabetically by id for a stable render order.
+
+A Staffer always renders their `idle` state at rest here — nothing yet drives a `working` state, since that means being mid-Job (Housekeeping/Kitchen), which tickets 08/13's Job travel adds. Manny has no `idle` sheet, so he renders his placeholder like anyone else's rest state would, rather than the `walk`-cycle demo ticket 06 hardcoded for him.
+
+Dragging a Staffer onto a post's drop-target rect (`ui/hotel_world.gd`'s `STATION_POST_HIT_SIZE`, larger than the prop's own 40×40 render footprint) calls the existing `Sim.assign_staffer()` — no new Sim state, same reassignment/interruption semantics the retired `ui/station_card.gd` used. A press/release with no meaningful movement is a tap instead, emitting `HotelWorld.staffer_tapped` so `main_screen.gd` opens the existing Staffer detail popup. Hit-testing is hand-rolled against world-space rects (`StafferActor.hit_rect()`, the post rects above) rather than Godot's Control-only drag-and-drop API, per spec.md's "whichever is cheaper" — playtest-verified, not unit-tested, same as every other rendering/hit-geometry decision in this contract.
