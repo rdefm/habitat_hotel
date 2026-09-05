@@ -57,7 +57,7 @@ A single unit of Housekeeping or Kitchen work with one target — a Room to clea
 Assigning a second Staffer to a Job already in progress at Housekeeping or Kitchen, summing Skill to finish faster. Capped at 2 Staffers per Job; Reception has no per-target Job to Stack on. See [[0008-staffer-stacking-on-jobs]].
 
 **Staff Pool**:
-The Staffers currently assigned to no Station at all — the roster's bench. Not a Station and not a Job: a pooled Staffer does nothing until assigned. Marlon starts here.
+The Staffers currently assigned to no Station at all — the roster's bench. Not a Station and not a Job: a pooled Staffer does nothing until assigned. Manny starts here.
 
 **Roster**:
 The set of Staffers currently unlocked and available for Station assignment (whether currently assigned or sitting in the Staff Pool). Grows via milestone unlocks (star level, cash, story beats) — never a procedurally generated hire/fire pool. See [[0002-staff-roster-unlocks]].

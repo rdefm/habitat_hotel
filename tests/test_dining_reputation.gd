@@ -17,14 +17,14 @@ extends "res://tests/helpers/sim_test_base.gd"
 ## Hearts handling for free through Sim._serve_walkin_diner()/
 ## _decay_walkin_patience() -- no dining-specific code of its own needed.
 ##
-## Starting hotel/roster as in test_walkin_dinner.gd: Marlon (kitchen skill
+## Starting hotel/roster as in test_walkin_dinner.gd: Manny (kitchen skill
 ## 3) is the only starting Staffer who clears stations.kitchen.dinner_min_skill (3).
 ## Clock phase boundaries (autoload/clock.gd): EVENING starts at tick 161,
 ## NIGHT at tick 221.
 
 const EVENING_START_TICK := 161
-const MARLON_DINNER_TICKS := 22 # balance.json's dinner_ticks_by_skill, skill 3
-const MARLON_KITCHEN_SKILL := 3
+const MANNY_DINNER_TICKS := 22 # balance.json's dinner_ticks_by_skill, skill 3
+const MANNY_KITCHEN_SKILL := 3
 
 
 func _push_walkin(id: int, patience: float, species_id: String = "test_species") -> void:
@@ -41,8 +41,8 @@ func _push_walkin(id: int, patience: float, species_id: String = "test_species")
 
 func test_dining_score_rises_with_a_daily_special_match() -> void:
 	var balance: Dictionary = GameState.balance
-	var without_match := Satisfaction.compute_dining(false, MARLON_KITCHEN_SKILL, balance)
-	var with_match := Satisfaction.compute_dining(true, MARLON_KITCHEN_SKILL, balance)
+	var without_match := Satisfaction.compute_dining(false, MANNY_KITCHEN_SKILL, balance)
+	var with_match := Satisfaction.compute_dining(true, MANNY_KITCHEN_SKILL, balance)
 	assert_gt(with_match, without_match, "matching the Daily Special should raise the dining score")
 
 
@@ -56,7 +56,7 @@ func test_dining_score_rises_with_kitchen_skill() -> void:
 ## --- A served Walk-in Diner feeds Hearts/Reputation through Satisfaction, same as a Checkout ---
 
 func test_served_walkin_diner_matching_daily_special_produces_hearts_and_a_positive_reputation_delta() -> void:
-	Sim.assign_staffer("marlon", "kitchen")
+	Sim.assign_staffer("manny", "kitchen")
 	Clock.force_advance_ticks(EVENING_START_TICK)
 	Sim.walkin_queue.clear()
 	GameState.set_daily_special("pigeon") # a real Species id -- set_daily_special() rejects unknown ones
@@ -65,10 +65,10 @@ func test_served_walkin_diner_matching_daily_special_produces_hearts_and_a_posit
 	var hearts_before := GameState.hearts
 
 	watch_signals(EventBus)
-	Clock.force_advance_ticks(MARLON_DINNER_TICKS + 5)
+	Clock.force_advance_ticks(MANNY_DINNER_TICKS + 5)
 
-	assert_true(Sim.walkin_queue.is_empty(), "Marlon should have served the Walk-in Diner")
-	var expected_score := Satisfaction.compute_dining(true, MARLON_KITCHEN_SKILL, GameState.balance)
+	assert_true(Sim.walkin_queue.is_empty(), "Manny should have served the Walk-in Diner")
+	var expected_score := Satisfaction.compute_dining(true, MANNY_KITCHEN_SKILL, GameState.balance)
 	assert_eq(expected_score, 85.0, "base 50 + the 20 special-match bonus + skill 3 * 5 per level")
 
 	assert_signal_emit_count(EventBus, "dining_guest_served", 1)
@@ -81,7 +81,7 @@ func test_served_walkin_diner_matching_daily_special_produces_hearts_and_a_posit
 
 
 func test_served_walkin_diner_without_a_special_match_can_score_neutral_with_no_hearts() -> void:
-	Sim.assign_staffer("marlon", "kitchen")
+	Sim.assign_staffer("manny", "kitchen")
 	Clock.force_advance_ticks(EVENING_START_TICK)
 	Sim.walkin_queue.clear()
 	assert_eq(GameState.daily_special, "", "no Daily Special chosen -- this Walk-in Diner can never match")
@@ -90,10 +90,10 @@ func test_served_walkin_diner_without_a_special_match_can_score_neutral_with_no_
 	var hearts_before := GameState.hearts
 
 	watch_signals(EventBus)
-	Clock.force_advance_ticks(MARLON_DINNER_TICKS + 5)
+	Clock.force_advance_ticks(MANNY_DINNER_TICKS + 5)
 
-	assert_true(Sim.walkin_queue.is_empty(), "Marlon should have served the Walk-in Diner")
-	var expected_score := Satisfaction.compute_dining(false, MARLON_KITCHEN_SKILL, GameState.balance)
+	assert_true(Sim.walkin_queue.is_empty(), "Manny should have served the Walk-in Diner")
+	var expected_score := Satisfaction.compute_dining(false, MANNY_KITCHEN_SKILL, GameState.balance)
 	assert_eq(expected_score, 65.0, "base 50 + no match bonus + skill 3 * 5 per level")
 
 	assert_signal_emitted_with_parameters(EventBus, "dining_guest_served", ["Test Diner 1", "test_species", "neutral", expected_score])

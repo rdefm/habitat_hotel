@@ -17,12 +17,12 @@ extends "res://tests/helpers/sim_test_base.gd"
 ## 1/3; the starting terrace.upkeep_per_day is 10.
 ##
 ## Clock phase boundaries (autoload/clock.gd): EVENING starts at tick 161,
-## NIGHT at tick 221. Starting roster: Marlon (kitchen skill 3) is the only
+## NIGHT at tick 221. Starting roster: Manny (kitchen skill 3) is the only
 ## starting Staffer who clears stations.kitchen.dinner_min_skill (3).
 
 const EVENING_START_TICK := 161
-const MARLON_DINNER_TICKS := 22 # balance.json's dinner_ticks_by_skill, skill 3
-const MARLON_KITCHEN_SKILL := 3
+const MANNY_DINNER_TICKS := 22 # balance.json's dinner_ticks_by_skill, skill 3
+const MANNY_KITCHEN_SKILL := 3
 
 
 func _push_walkin(id: int, patience: float, species_id: String = "test_species") -> void:
@@ -146,16 +146,16 @@ func test_effective_terrace_stats_merges_every_purchased_upgrades_effects() -> v
 func test_satisfaction_bonus_upgrade_raises_a_served_walkin_diners_score() -> void:
 	GameState.hearts = 20
 	GameState.purchase_terrace_upgrade("seasoned_recipes") # satisfaction_bonus +10
-	Sim.assign_staffer("marlon", "kitchen")
+	Sim.assign_staffer("manny", "kitchen")
 	Clock.force_advance_ticks(EVENING_START_TICK)
 	Sim.walkin_queue.clear()
 	_push_walkin(1, 999.0)
 
 	watch_signals(EventBus)
-	Clock.force_advance_ticks(MARLON_DINNER_TICKS + 5)
+	Clock.force_advance_ticks(MANNY_DINNER_TICKS + 5)
 
-	assert_true(Sim.walkin_queue.is_empty(), "Marlon should have served the Walk-in Diner")
-	var expected_score := Satisfaction.compute_dining(false, MARLON_KITCHEN_SKILL, GameState.balance, 10.0)
+	assert_true(Sim.walkin_queue.is_empty(), "Manny should have served the Walk-in Diner")
+	var expected_score := Satisfaction.compute_dining(false, MANNY_KITCHEN_SKILL, GameState.balance, 10.0)
 	assert_signal_emitted_with_parameters(EventBus, "dining_guest_served", ["Test Diner 1", "test_species", "positive", expected_score])
 
 

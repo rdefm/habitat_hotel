@@ -8,7 +8,7 @@
     "base_rate": 40,
     "capacity": 2,
     "unlock": {"star": 1},
-    "max_instances": 4,
+    "max_instances": 2,
     "upgrades": [
       {
         "id": "extra_bedding",
@@ -37,7 +37,7 @@
     "base_rate": 35,
     "capacity": 4,
     "unlock": {"star": 1},
-    "max_instances": 4,
+    "max_instances": 2,
     "upgrades": [
       {
         "id": "wider_perches",
@@ -66,7 +66,7 @@
     "base_rate": 60,
     "capacity": 3,
     "unlock": {"star": 1},
-    "max_instances": 4,
+    "max_instances": 2,
     "upgrades": [
       {
         "id": "heated_filtration",
@@ -95,7 +95,7 @@
     "base_rate": 120,
     "capacity": 4,
     "unlock": {"star": 2},
-    "max_instances": 4,
+    "max_instances": 2,
     "upgrades": [
       {
         "id": "soundproofing",
@@ -124,7 +124,7 @@
     "base_rate": 150,
     "capacity": 3,
     "unlock": {"star": 3},
-    "max_instances": 4,
+    "max_instances": 2,
     "upgrades": [
       {
         "id": "reinforced_beams",
@@ -145,7 +145,7 @@
     "base_rate": 180,
     "capacity": 2,
     "unlock": {"star": 3},
-    "max_instances": 4,
+    "max_instances": 2,
     "upgrades": [
       {
         "id": "extra_windbreak",

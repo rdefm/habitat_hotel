@@ -9,7 +9,7 @@ extends RefCounted
 ##
 ## Bellhop was a fourth Station until ADR-0019 removed it along with its
 ## Escort Job; check-in is now a flat delay no Station gates at all (see
-## Sim._start_checkin()). A Staffer with no Station -- the state Marlon
+## Sim._start_checkin()). A Staffer with no Station -- the state Manny
 ## starts in now -- is in the Staff Pool, which is the absence of an entry
 ## here rather than an id of its own.
 

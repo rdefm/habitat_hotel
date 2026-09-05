@@ -68,13 +68,17 @@ func test_leaves_the_party_queued_to_expire_on_its_own_patience_when_neither_hin
 
 func test_an_oversized_party_is_seated_chunk_by_chunk_across_rooms_by_a_single_pass() -> void:
 	Clock.force_advance_ticks(1)
-	GameState.build_room("lagoon_room") # lagoon_room#2, so 3x capacity-3 lagoon rooms exist
-	Sim.pending_arrivals.append(make_party(1, ["warm", "water"], 9, "low")) # 3 lagoon rooms x capacity 3 = 9
+	# lagoon_room's max_instances is 2 and the starting hotel already builds
+	# both (lagoon_room#0/#1), so a 3rd instance can't be built to test a
+	# 3-room split -- 2 capacity-3 lagoon rooms is the largest same-type
+	# green split now reachable.
+	Sim.pending_arrivals.append(make_party(1, ["warm", "water"], 6, "low")) # 2 lagoon rooms x capacity 3 = 6
 
 	BatchRunner._seat_pending_arrivals()
 
-	assert_true(Sim.pending_party(1).is_empty(), "the whole party should be seated across the three lagoon rooms")
-	assert_eq(Sim.guests.size(), 3)
+	assert_true(Sim.pending_party(1).is_empty(), "the whole party should be seated across both lagoon rooms")
+	assert_eq(GameState.room_instance("lagoon_room", 0)["occupant_name"], "Test Guest 1", "the first lagoon Room should hold a chunk of the party")
+	assert_eq(GameState.room_instance("lagoon_room", 1)["occupant_name"], "Test Guest 1", "the second lagoon Room should hold a chunk of the party")
 
 
 func test_run_wires_the_autopilot_into_the_real_day_cycle_without_a_policy_argument() -> void:

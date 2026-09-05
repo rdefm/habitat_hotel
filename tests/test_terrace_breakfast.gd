@@ -6,7 +6,7 @@ extends "res://tests/helpers/sim_test_base.gd"
 ## currently-staying guest joins Sim.breakfast_queue fresh each Morning, and
 ## a Kitchen Staffer serves queued entries only at/above
 ## data/balance.json's stations.kitchen.breakfast_min_skill -- Biscuit's
-## kitchen skill (1) sits below that threshold; Shelly's (2) and Marlon's
+## kitchen skill (1) sits below that threshold; Shelly's (2) and Manny's
 ## (3) sit at/above it (see data/staffers.json). See
 ## .scratch/direct-manipulation-core-loop/issues/09-terrace-breakfast.md.
 ##
@@ -92,20 +92,20 @@ func test_empty_kitchen_station_means_no_breakfast_served() -> void:
 
 func test_reassigning_a_kitchen_staffer_mid_job_interrupts_only_their_job() -> void:
 	Sim.assign_staffer("shelly", "kitchen") # skill 2
-	Sim.assign_staffer("marlon", "kitchen") # skill 3
+	Sim.assign_staffer("manny", "kitchen") # skill 3
 	_seat(1, "cozy_nook", 0, ["warm", "dry", "quiet"])
 	_seat(2, "roost_loft", 0, ["high_perch", "dry"])
 
 	Clock.force_advance_ticks(1) # Day 1's Morning, both Staffers claim an entry
 	assert_false(Sim.breakfast_job("shelly").is_empty())
-	assert_false(Sim.breakfast_job("marlon").is_empty())
-	var marlon_entry_id: int = int(Sim.breakfast_job("marlon")["entry_id"])
-	var marlon_ticks_before: int = int(Sim.breakfast_job("marlon")["ticks_remaining"])
+	assert_false(Sim.breakfast_job("manny").is_empty())
+	var manny_entry_id: int = int(Sim.breakfast_job("manny")["entry_id"])
+	var manny_ticks_before: int = int(Sim.breakfast_job("manny")["ticks_remaining"])
 
 	Sim.assign_staffer("shelly", "reception") # interrupt only Shelly's job
 
 	assert_true(Sim.breakfast_job("shelly").is_empty(), "Shelly's in-flight job should be dropped")
-	var marlon_job_after := Sim.breakfast_job("marlon")
-	assert_eq(int(marlon_job_after["entry_id"]), marlon_entry_id, "Marlon's own job shouldn't be touched")
-	assert_eq(int(marlon_job_after["ticks_remaining"]), marlon_ticks_before)
+	var manny_job_after := Sim.breakfast_job("manny")
+	assert_eq(int(manny_job_after["entry_id"]), manny_entry_id, "Manny's own job shouldn't be touched")
+	assert_eq(int(manny_job_after["ticks_remaining"]), manny_ticks_before)
 	assert_eq(Sim.breakfast_queue.size(), 2, "the interrupted entry goes back to waiting, not removed")

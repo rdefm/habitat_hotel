@@ -14,12 +14,12 @@ extends "res://tests/helpers/sim_test_base.gd"
 ##
 ## Starting hotel (data/starting_hotel.json): cozy_nook#0 (capacity 2, tags
 ## warm/dry/quiet), roost_loft#0 (capacity 4, tags high_perch/dry). Starting
-## roster (data/staffers.json): Marlon's kitchen skill (3) clears
+## roster (data/staffers.json): Manny's kitchen skill (3) clears
 ## stations.kitchen.dinner_min_skill (3); Shelly's (2) doesn't. Clock phase
 ## boundaries (autoload/clock.gd): EVENING starts at tick 161.
 
 const EVENING_START_TICK := 161
-const MARLON_DINNER_TICKS := 22 # balance.json's dinner_ticks_by_skill, skill 3
+const MANNY_DINNER_TICKS := 22 # balance.json's dinner_ticks_by_skill, skill 3
 
 
 func _seat(party_id: int, room_type_id: String, instance_id: int, needs: Array, dinner_addon: bool = false) -> void:
@@ -115,7 +115,7 @@ func test_dinner_min_skill_gates_serving_the_addon_same_as_a_walkin() -> void:
 ## --- Served outcome feeds Reputation/Hearts and resolves the indicator (ticket 11) ---
 
 func test_served_addon_feeds_hearts_and_reputation_and_clears_the_room_card() -> void:
-	Sim.assign_staffer("marlon", "kitchen")
+	Sim.assign_staffer("manny", "kitchen")
 	_seat(1, "cozy_nook", 0, ["warm", "dry", "quiet"], true)
 	var gid: int = GameState.room_instance("cozy_nook", 0)["occupant"]
 
@@ -127,9 +127,9 @@ func test_served_addon_feeds_hearts_and_reputation_and_clears_the_room_card() ->
 	# walk-aways by this point, same precedent as test_dining_reputation.gd.
 	var reputation_before := GameState.reputation
 	var hearts_before := GameState.hearts
-	Clock.force_advance_ticks(MARLON_DINNER_TICKS + 5)
+	Clock.force_advance_ticks(MANNY_DINNER_TICKS + 5)
 
-	assert_true(_find_walkin_entry_for_guest(gid).is_empty(), "Marlon should have served the add-on")
+	assert_true(_find_walkin_entry_for_guest(gid).is_empty(), "Manny should have served the add-on")
 	assert_signal_emit_count(EventBus, "dining_guest_served", 1)
 
 	var room := GameState.room_instance("cozy_nook", 0)

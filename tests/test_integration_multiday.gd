@@ -12,19 +12,19 @@ extends "res://tests/helpers/sim_test_base.gd"
 ##
 ## BatchRunner.run()'s default leaves Kitchen empty (matching interactive
 ## play's starting coverage), which would mean Dining never actually serves
-## anyone in a batch run -- so this test passes {"marlon": "kitchen"}
-## (Marlon's the only Staffer whose kitchen skill, 3, clears
+## anyone in a batch run -- so this test passes {"manny": "kitchen"}
+## (Manny's the only Staffer whose kitchen skill, 3, clears
 ## stations.kitchen.dinner_min_skill) to actually exercise Dining service.
-## That fills every one of the three Stations (ADR-0019), since Marlon
+## That fills every one of the three Stations (ADR-0019), since Manny
 ## starts unassigned rather than on the removed Bellhop Station.
 
 const BatchRunner = preload("res://sim/batch_runner.gd")
 const RUN_DAYS := 60
 const CSV_PATH := "user://test_integration_multiday.csv"
 const SEED := 12345
-# Marlon's kitchen skill (3) is the only starting Staffer clearing
+# Manny's kitchen skill (3) is the only starting Staffer clearing
 # stations.kitchen.dinner_min_skill -- see test_dining_reputation.gd.
-const KITCHEN_STAFFED := {"marlon": "kitchen"}
+const KITCHEN_STAFFED := {"manny": "kitchen"}
 
 
 func test_60_day_run_with_full_station_coverage_resolves_every_party_and_dining_guest() -> void:

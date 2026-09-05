@@ -41,7 +41,7 @@ var stations: Dictionary = {}
 # Mirrors the reference prototype's starting coverage, minus the Bellhop
 # Station ADR-0019 removed: Biscuit on Reception, Shelly on Housekeeping,
 # Kitchen unstaffed (the player assigns someone to run breakfast/dinner
-# service themselves). Marlon, Bellhop's old default Staffer, now starts
+# service themselves). Manny, Bellhop's old default Staffer, now starts
 # with no Station at all -- the Staff Pool -- which is a state
 # staffer_station() has always modelled as "" and ui/station_panel.gd
 # already renders its own row for.

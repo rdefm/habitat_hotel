@@ -9,7 +9,7 @@ extends "res://tests/helpers/sim_test_base.gd"
 ## higher Kitchen skill threshold than breakfast --
 ## data/balance.json's stations.kitchen.dinner_min_skill (3) sits above
 ## breakfast_min_skill (2): Biscuit's kitchen skill (1) sits below both,
-## Shelly's (2) clears breakfast only, Marlon's (3) clears both (see
+## Shelly's (2) clears breakfast only, Manny's (3) clears both (see
 ## data/staffers.json). See
 ## .scratch/direct-manipulation-core-loop/issues/10-walk-in-dinner-daily-special.md.
 ##
@@ -20,8 +20,8 @@ extends "res://tests/helpers/sim_test_base.gd"
 const DemandGenerator = preload("res://sim/demand_generator.gd")
 
 const DINNER_MIN_SKILL := 3 # balance.json's stations.kitchen.dinner_min_skill
-const MARLON_BREAKFAST_TICKS := 16 # balance.json's breakfast_ticks_by_skill, skill 3
-const MARLON_DINNER_TICKS := 22 # balance.json's dinner_ticks_by_skill, skill 3
+const MANNY_BREAKFAST_TICKS := 16 # balance.json's breakfast_ticks_by_skill, skill 3
+const MANNY_DINNER_TICKS := 22 # balance.json's dinner_ticks_by_skill, skill 3
 const SHELLY_BREAKFAST_TICKS := 20 # balance.json's breakfast_ticks_by_skill, skill 2
 const EVENING_START_TICK := 161
 
@@ -93,15 +93,15 @@ func test_daily_special_measurably_biases_walkin_species() -> void:
 ## --- Kitchen skill gates who can serve dinner/Walk-in demand ---
 
 func test_kitchen_staffer_above_dinner_threshold_serves_both_breakfast_and_walkin() -> void:
-	assert_true(int(GameState.staffers["marlon"]["skills"]["kitchen"]) >= DINNER_MIN_SKILL, "test assumes Marlon meets the dinner threshold")
-	Sim.assign_staffer("marlon", "kitchen")
+	assert_true(int(GameState.staffers["manny"]["skills"]["kitchen"]) >= DINNER_MIN_SKILL, "test assumes Manny meets the dinner threshold")
+	Sim.assign_staffer("manny", "kitchen")
 	_seat(1, "cozy_nook", 0, ["warm", "dry", "quiet"])
 	_push_walkin(999, 999.0) # patience won't expire within this test's window
 
-	Clock.force_advance_ticks(MARLON_BREAKFAST_TICKS + MARLON_DINNER_TICKS + 5) # comfortably past both jobs, still well before Evening (161)
+	Clock.force_advance_ticks(MANNY_BREAKFAST_TICKS + MANNY_DINNER_TICKS + 5) # comfortably past both jobs, still well before Evening (161)
 
-	assert_true(Sim.breakfast_queue.is_empty(), "Marlon should have served breakfast")
-	assert_true(Sim.walkin_queue.is_empty(), "Marlon should also have served the Walk-in Diner")
+	assert_true(Sim.breakfast_queue.is_empty(), "Manny should have served breakfast")
+	assert_true(Sim.walkin_queue.is_empty(), "Manny should also have served the Walk-in Diner")
 
 
 func test_kitchen_staffer_above_breakfast_but_below_dinner_serves_breakfast_only() -> void:
@@ -120,19 +120,19 @@ func test_kitchen_staffer_above_breakfast_but_below_dinner_serves_breakfast_only
 
 func test_reassigning_a_kitchen_staffer_mid_dinner_job_interrupts_only_their_job() -> void:
 	Sim.assign_staffer("shelly", "kitchen") # skill 2, breakfast only
-	Sim.assign_staffer("marlon", "kitchen") # skill 3, clears the dinner threshold too
+	Sim.assign_staffer("manny", "kitchen") # skill 3, clears the dinner threshold too
 	_seat(1, "cozy_nook", 0, ["warm", "dry", "quiet"])
 	_push_walkin(1, 999.0)
 
-	Clock.force_advance_ticks(1) # Day 1's Morning: Shelly claims breakfast, Marlon claims the Walk-in Diner
+	Clock.force_advance_ticks(1) # Day 1's Morning: Shelly claims breakfast, Manny claims the Walk-in Diner
 	assert_false(Sim.breakfast_job("shelly").is_empty(), "Shelly should have claimed the breakfast entry")
-	assert_false(Sim.dinner_job("marlon").is_empty(), "Marlon should have claimed the only Walk-in Diner")
+	assert_false(Sim.dinner_job("manny").is_empty(), "Manny should have claimed the only Walk-in Diner")
 	var shelly_entry_id: int = int(Sim.breakfast_job("shelly")["entry_id"])
 	var shelly_ticks_before: int = int(Sim.breakfast_job("shelly")["ticks_remaining"])
 
-	Sim.assign_staffer("marlon", "reception") # interrupt only Marlon's dinner job
+	Sim.assign_staffer("manny", "reception") # interrupt only Manny's dinner job
 
-	assert_true(Sim.dinner_job("marlon").is_empty(), "Marlon's in-flight dinner job should be dropped")
+	assert_true(Sim.dinner_job("manny").is_empty(), "Manny's in-flight dinner job should be dropped")
 	assert_eq(Sim.walkin_queue.size(), 1, "the interrupted Walk-in Diner goes back to waiting, not removed")
 	var shelly_job_after := Sim.breakfast_job("shelly")
 	assert_eq(int(shelly_job_after["entry_id"]), shelly_entry_id, "Shelly's own breakfast job shouldn't be touched")

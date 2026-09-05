@@ -26,17 +26,16 @@ func test_builds_room_into_an_unlocked_floor_under_its_instance_cap() -> void:
 
 
 func test_build_fails_once_a_floors_instance_cap_is_reached() -> void:
-	# lagoon_room starts with 2 built instances and a max_instances of 4.
-	assert_true(GameState.build_room("lagoon_room"))
-	assert_true(GameState.build_room("lagoon_room"))
-	assert_eq(GameState.floor_instance_count("lagoon_room"), 4, "lagoon_room's Floor should now be at its cap")
+	# cozy_nook starts with 1 built instance and a max_instances of 2.
+	assert_true(GameState.build_room("cozy_nook"))
+	assert_eq(GameState.floor_instance_count("cozy_nook"), 2, "cozy_nook's Floor should now be at its cap")
 	var cash_before: int = GameState.cash
 
-	var built := GameState.build_room("lagoon_room")
+	var built := GameState.build_room("cozy_nook")
 
 	assert_false(built, "building past a Floor's instance cap should refuse, with no side effects")
 	assert_eq(GameState.cash, cash_before)
-	assert_eq(GameState.floor_instance_count("lagoon_room"), 4)
+	assert_eq(GameState.floor_instance_count("cozy_nook"), 2)
 
 
 func test_build_fails_for_a_room_type_not_yet_star_unlocked() -> void:

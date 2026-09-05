@@ -1,7 +1,7 @@
 extends "res://tests/helpers/sim_test_base.gd"
 
 ## Characterizes the Roster & Station core (ADR-0002/0005): the three
-## authored Staffers (Biscuit, Marlon, Shelly) each carry a Skill (1-5) at
+## authored Staffers (Biscuit, Manny, Shelly) each carry a Skill (1-5) at
 ## every Station, Sim.assign_staffer() is the sole reassignment path and
 ## interrupts only the moved Staffer's own in-flight Housekeeping job, and
 ## leaving a Station empty measurably degrades that Station's service
@@ -17,7 +17,7 @@ extends "res://tests/helpers/sim_test_base.gd"
 ## warm/dry/quiet), roost_loft#0 (capacity 4, tags high_perch/dry),
 ## lagoon_room#0/#1 (capacity 3, tags warm/water). Default Station coverage
 ## (GameState.DEFAULT_STATION_ASSIGNMENTS): Biscuit/Reception,
-## Shelly/Housekeeping, Kitchen empty, Marlon unassigned in the Staff Pool.
+## Shelly/Housekeeping, Kitchen empty, Manny unassigned in the Staff Pool.
 
 const Station = preload("res://sim/station.gd")
 
@@ -44,7 +44,7 @@ func _party_by_id(id: int) -> Dictionary:
 
 func test_all_three_staffers_carry_a_skill_rating_at_every_station() -> void:
 	assert_eq(GameState.staffers.keys().size(), 3)
-	for id in ["biscuit", "marlon", "shelly"]:
+	for id in ["biscuit", "manny", "shelly"]:
 		assert_true(GameState.staffers.has(id))
 		var skills: Dictionary = GameState.staffers[id]["skills"]
 		for station_id in ["reception", "housekeeping", "kitchen"]:
@@ -64,12 +64,12 @@ func test_default_coverage_matches_the_reference_starting_assignment() -> void:
 	assert_eq(GameState.staffer_station("biscuit"), "reception")
 	assert_eq(GameState.staffer_station("shelly"), "housekeeping")
 	assert_true(GameState.station_staffers("kitchen").is_empty())
-	assert_eq(GameState.staffer_station("marlon"), "", "Bellhop's old default Staffer starts unassigned in the Staff Pool")
+	assert_eq(GameState.staffer_station("manny"), "", "Bellhop's old default Staffer starts unassigned in the Staff Pool")
 
 
 func test_no_staffer_can_be_assigned_to_bellhop_anywhere() -> void:
-	assert_false(Sim.assign_staffer("marlon", "bellhop"))
-	assert_eq(GameState.staffer_station("marlon"), "", "a rejected assignment shouldn't move anyone")
+	assert_false(Sim.assign_staffer("manny", "bellhop"))
+	assert_eq(GameState.staffer_station("manny"), "", "a rejected assignment shouldn't move anyone")
 	assert_false(GameState.stations.has("bellhop"), "no Station vocabulary entry should survive either")
 
 
@@ -89,33 +89,33 @@ func test_assign_staffer_returns_false_and_has_no_effect_for_an_unknown_staffer_
 
 
 func test_kitchen_station_assignment_is_tracked_even_without_a_gated_effect_yet() -> void:
-	assert_true(Sim.assign_staffer("marlon", "kitchen"))
-	assert_eq(GameState.staffer_station("marlon"), "kitchen")
-	assert_true(GameState.station_staffers("kitchen").has("marlon"))
+	assert_true(Sim.assign_staffer("manny", "kitchen"))
+	assert_eq(GameState.staffer_station("manny"), "kitchen")
+	assert_true(GameState.station_staffers("kitchen").has("manny"))
 
 
 ## --- Reassigning mid-task interrupts only that Staffer's own job ---
 
 func test_reassigning_a_housekeeper_mid_job_reverts_only_their_room_leaving_others_untouched() -> void:
-	Sim.assign_staffer("marlon", "housekeeping") # Shelly + Marlon both cleaning now
+	Sim.assign_staffer("manny", "housekeeping") # Shelly + Manny both cleaning now
 	GameState.room_instance("cozy_nook", 0)["needs_cleaning"] = true
 	GameState.room_instance("roost_loft", 0)["needs_cleaning"] = true
 
 	Clock.force_advance_ticks(1) # both Staffers claim a Room and tick down once
 
 	var shelly_job := Sim.cleaning_job("shelly")
-	var marlon_job := Sim.cleaning_job("marlon")
+	var manny_job := Sim.cleaning_job("manny")
 	assert_false(shelly_job.is_empty())
-	assert_false(marlon_job.is_empty())
-	var marlon_ticks_before: int = int(marlon_job["ticks_remaining"])
+	assert_false(manny_job.is_empty())
+	var manny_ticks_before: int = int(manny_job["ticks_remaining"])
 
 	Sim.assign_staffer("shelly", "reception") # interrupt only Shelly's job
 
 	assert_true(Sim.cleaning_job("shelly").is_empty(), "Shelly's in-flight job should be dropped")
-	var marlon_job_after := Sim.cleaning_job("marlon")
-	assert_eq(int(marlon_job_after["ticks_remaining"]), marlon_ticks_before, "Marlon's own progress shouldn't be touched")
+	var manny_job_after := Sim.cleaning_job("manny")
+	assert_eq(int(manny_job_after["ticks_remaining"]), manny_ticks_before, "Manny's own progress shouldn't be touched")
 	assert_true(GameState.room_instance(shelly_job["room_type_id"], int(shelly_job["instance_id"]))["needs_cleaning"], "Shelly's half-cleaned Room reverts to (stays) dirty")
-	assert_true(GameState.room_instance(marlon_job["room_type_id"], int(marlon_job["instance_id"]))["needs_cleaning"], "Marlon's Room is still mid-clean, untouched by Shelly's reassignment")
+	assert_true(GameState.room_instance(manny_job["room_type_id"], int(manny_job["instance_id"]))["needs_cleaning"], "Manny's Room is still mid-clean, untouched by Shelly's reassignment")
 
 
 ## --- Leaving a Station empty visibly degrades its service ---
