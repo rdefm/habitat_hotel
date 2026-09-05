@@ -15,8 +15,6 @@ extends Node2D
 
 const BuildingLayout = preload("res://sim/building_layout.gd")
 
-const SHELL_DIR := "res://assets/hotel_shell/"
-
 ## Most-zoomed-in Camera2D.zoom value this world allows. Confirmed
 ## empirically against this project's canvas_items+expand stretch setup
 ## (project.godot) -- a fixed-size probe sprite measured exactly 2x the
@@ -118,23 +116,38 @@ func _add_floor_band(floors: Array, i: int) -> void:
 	var top_y: float = bottom_y - float(f["height"])
 
 	if f["band_variant"] == "full":
-		var filename := "lobby_band.png" if f["kind"] == "reception" else "terrace_band.png"
-		var sprite := _make_sprite(filename)
+		var sprite := _make_sprite(_shell_file_for_full_band(f))
 		sprite.position = Vector2(0, top_y)
 		_building.add_child(sprite)
 	else:
-		_add_tiled_room_band(top_y, float(f["height"]))
+		_add_tiled_room_band(top_y, float(f["height"]), f["interior"])
 
 	_add_floor_sign(String(f["sign_text"]), top_y)
 
 
-## A Room floor with no painted interior of its own yet (ticket 05 assigns
-## the three that get one): the reusable frame_column_left/right +
-## elevator_shaft_segment tiles from ticket 03, flanking a plain tinted
-## placeholder for the interior, at the exact x-offsets ticket 03's cut
+## Reception and Terrace always use their own fixed full-width band; a
+## "full" Room floor is one of ticket 05's three painted types, whose
+## specific file BuildingLayout.resolve_room_interior() already picked --
+## the renderer just load()s whatever path it's handed, per every slot in
+## this file, rather than deciding anything on its own.
+func _shell_file_for_full_band(f: Dictionary) -> String:
+	if f["kind"] == "reception":
+		return "lobby_band.png"
+	if f["kind"] == "terrace":
+		return "terrace_band.png"
+	return String(f["interior"]["file"])
+
+
+## A Room floor with no painted interior of its own (ticket 05's fallback
+## for cozy_nook/cavern_suite/tundra_hall, or any Room type outside
+## BuildingLayout.ROOM_TYPE_INTERIOR_FILE): the reusable
+## frame_column_left/right + elevator_shaft_segment tiles from ticket 03,
+## flanking a placeholder tinted and labelled per Room type (rather than
+## ticket 04's single neutral tint) at the exact x-offsets ticket 03's cut
 ## documents (column 0-71, shaft 71-168, interior 168-501, column 501-572
-## of the 572-wide row).
-func _add_tiled_room_band(top_y: float, height: float) -> void:
+## of the 572-wide row) -- identical footprint to a painted interior at
+## the same height, per the contract's fallback rule.
+func _add_tiled_room_band(top_y: float, height: float, interior: Dictionary) -> void:
 	var left := _make_sprite("frame_column_left.png")
 	left.position = Vector2(0, top_y)
 	_building.add_child(left)
@@ -144,7 +157,7 @@ func _add_tiled_room_band(top_y: float, height: float) -> void:
 	_building.add_child(shaft)
 
 	var placeholder := ColorRect.new()
-	placeholder.color = Color(0.33, 0.3, 0.28)
+	placeholder.color = interior["tint"]
 	placeholder.size = Vector2(BuildingLayout.INTERIOR_WIDTH, height)
 	placeholder.position = Vector2(BuildingLayout.COLUMN_WIDTH + BuildingLayout.SHAFT_WIDTH, top_y)
 	placeholder.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -153,6 +166,23 @@ func _add_tiled_room_band(top_y: float, height: float) -> void:
 	var right := _make_sprite("frame_column_right.png")
 	right.position = Vector2(BuildingLayout.COLUMN_WIDTH + BuildingLayout.SHAFT_WIDTH + BuildingLayout.INTERIOR_WIDTH, top_y)
 	_building.add_child(right)
+
+	_add_placeholder_label(String(interior["label"]), top_y, height)
+
+
+## The temporary label ticket 05's contract calls for on a fallback
+## interior -- disappears the moment that Room type gets a real painted
+## slot, same as the contract's general fallback text.
+func _add_placeholder_label(text: String, top_y: float, height: float) -> void:
+	var label := Label.new()
+	label.text = text
+	label.position = Vector2(BuildingLayout.COLUMN_WIDTH + BuildingLayout.SHAFT_WIDTH + 10.0, top_y + height / 2.0)
+	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_color_override("font_color", Color(1, 1, 1))
+	label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	label.add_theme_constant_override("shadow_offset_x", 1)
+	label.add_theme_constant_override("shadow_offset_y", 1)
+	_building.add_child(label)
 
 
 func _add_floor_sign(sign_text: String, top_y: float) -> void:
@@ -169,7 +199,7 @@ func _add_floor_sign(sign_text: String, top_y: float) -> void:
 
 func _make_sprite(filename: String) -> Sprite2D:
 	var sprite := Sprite2D.new()
-	sprite.texture = load(SHELL_DIR + filename)
+	sprite.texture = load(BuildingLayout.SHELL_DIR + filename)
 	sprite.centered = false
 	return sprite
 

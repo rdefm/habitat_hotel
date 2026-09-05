@@ -10,8 +10,18 @@ class GutOrphanage:
 	var strutils = GutUtils.Strutils.new()
 
 	# wrapper for stubbing
+	#
+	# PROJECT PATCH: Node.get_orphan_node_ids() doesn't exist on Godot 4.4
+	# (this project's pinned engine -- confirmed directly: ClassDB reports
+	# no such method, only the older print_orphan_nodes(), which prints
+	# rather than returning ids). Per-orphan id tracking/grouping is
+	# unavailable on this engine build, so this returns an empty list --
+	# orphan_count() a few lines down still works (it reads
+	# Performance.OBJECT_ORPHAN_NODE_COUNT, stable API), so a leak still
+	# shows up as a non-zero count; only GUT's detailed per-test/per-group
+	# orphan listing is lost.
 	func _get_system_orphan_node_ids():
-		return Node.get_orphan_node_ids()
+		return []
 
 
 	func _make_group_key(group=null, subgroup=null):

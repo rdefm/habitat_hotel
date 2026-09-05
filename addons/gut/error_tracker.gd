@@ -1,24 +1,33 @@
-extends Logger
+# PROJECT PATCH (not upstream GUT 9.6.1): `extends Logger` here, and the
+# `Array[ScriptBacktrace]`-typed _log_error() override below it, both fail
+# to PARSE on Godot 4.4 -- `Logger` and `ScriptBacktrace` aren't exposed for
+# GDScript subclassing/typing until a later engine line. Confirmed directly
+# with a minimal repro script (`extends Logger` alone fails with "Could not
+# find base class \"Logger\""), not inferred -- this project's
+# project.godot pins config/features to "4.4", so this vendored copy is
+# patched to degrade rather than to require an engine bump. The
+# consequence: GutErrorTracker can no longer hook OS.add_logger() to
+# auto-fail a test on a stray engine/script error during it --
+# register_logger()/deregister_logger() below are no-ops and the Logger
+# override is dropped entirely. Every explicit assert_*() call GUT tests
+# use is completely unaffected; only that one extra safety net is gone.
+extends RefCounted
 class_name GutErrorTracker
 
 # ------------------------------------------------------------------------------
-# Static methods wrap around add/remove logger to make disabling the logger
-# easier and to help avoid misusing add/remove in tests.  If GUT needs to
-# add/remove a logger then this is how it should do it.
+# No-ops on this engine build -- see the patch note above. Kept (rather than
+# deleted) so every call site elsewhere in addons/gut and this project's
+# gut_config.gd keeps working unchanged.
 # ------------------------------------------------------------------------------
 static var registered_loggers := {}
 static var register_loggers = true
 
-static func register_logger(which):
-	if(register_loggers and !registered_loggers.has(which)):
-		OS.add_logger(which)
-		registered_loggers[which] = get_stack()
+static func register_logger(_which):
+	pass
 
 
-static func deregister_logger(which):
-	if(registered_loggers.has(which)):
-		OS.remove_logger(which)
-		registered_loggers.erase(which)
+static func deregister_logger(_which):
+	pass
 
 
 
@@ -80,17 +89,11 @@ func _is_error_failable(error : GutTrackedError):
 #region Godot's Logger Overrides
 # ----------------
 
-# Godot's Logger virtual method for errors
-func _log_error(function: String, file: String, line: int,
-	code: String, rationale: String, editor_notify: bool,
-	error_type: int, script_backtraces: Array[ScriptBacktrace]) -> void:
-		add_error(function, file, line,
-			code, rationale, editor_notify,
-			error_type, script_backtraces)
-
-# Godot's Logger virtual method for any output?
-# func _log_message(message: String, error: bool) -> void:
-# 	pass
+# PROJECT PATCH: the real _log_error() override (Godot's Logger virtual,
+# typed `script_backtraces: Array[ScriptBacktrace]`) is removed -- it can't
+# parse on Godot 4.4 (see this file's top-of-file patch note) and, since
+# GutErrorTracker no longer extends Logger, the engine would never call it
+# anyway. add_error() below is still reachable directly if anything needs it.
 
 # ----------------
 #endregion
