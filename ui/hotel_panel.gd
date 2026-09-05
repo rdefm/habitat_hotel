@@ -198,7 +198,7 @@ func _make_cell(room_type_id: String, room_type: Dictionary, instance_id: int, r
 		modulate_color = Color(0.8, 0.75, 0.5)
 		tooltip = "Being cleaned by housekeeping"
 
-	btn.text = "%s #%d%s%s%s" % [room_type["name"], instance_id, suffix, occupant_line]
+	btn.text = "%s #%d%s%s" % [room_type["name"], instance_id, suffix, occupant_line]
 	btn.disabled = not interactive
 	if selected_party_id != -1:
 		var hint := Sim.match_hint(selected_party_id, room_type_id, instance_id)
