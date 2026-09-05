@@ -13,6 +13,7 @@ extends Control
 ## _on_terrace_tapped already opens ui/terrace_menu.gd.
 
 const HotelView = preload("res://ui/hotel_view.gd")
+const HotelWorld = preload("res://ui/hotel_world.gd")
 const HotelPanel = preload("res://ui/hotel_panel.gd")
 const ReceptionPanel = preload("res://ui/reception_panel.gd")
 const StationPanel = preload("res://ui/station_panel.gd")
@@ -29,6 +30,16 @@ const RoomOccupancyLayer = preload("res://ui/room_occupancy_layer.gd")
 const StaffJobTravelLayer = preload("res://ui/staff_job_travel_layer.gd")
 const ToastLayer = preload("res://ui/toast_layer.gd")
 
+## Ticket 04 (ADR-0020): true mounts the new Node2D world (ui/hotel_world.gd)
+## in place of the old Control/ScrollContainer stack (ui/hotel_view.gd);
+## false keeps the pre-ADR-0020 view running unchanged. Both stay wired to
+## the same GameState/Sim autoloads and both are playable -- flip this
+## during development until ticket 17 deletes the old view (and this flag)
+## for good. The old view's Room/Station/Reception/Terrace interactivity
+## has no equivalent in the world yet (tickets 06-09 build it); with the
+## flag true, the world only draws -- nothing in it is tappable yet.
+const USE_HOTEL_WORLD := true
+
 var _cash_label: Label
 var _hearts_label: Label
 var _reputation_label: Label
@@ -38,12 +49,14 @@ var _season_label: Label
 var _pause_button: Button
 var _play_button: Button
 var _fast_button: Button
+var _fit_all_button: Button
 
 var _overlay: Control
 var _overlay_title: Label
 var _overlay_body: VBoxContainer
 var _overlay_content: Control
 var _popup_host: PopupHost
+var _hotel_world: HotelWorld
 var _hotel_panel: HotelPanel
 var _reception_panel: ReceptionPanel
 var _station_panel: StationPanel
@@ -56,15 +69,48 @@ var _terrace_panel: TerracePanel
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 
-	var root := VBoxContainer.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(root)
+	if USE_HOTEL_WORLD:
+		_hotel_world = HotelWorld.new()
+		add_child(_hotel_world)
+	else:
+		_build_old_hotel_view()
 
-	root.add_child(_build_top_bar())
+	## The HUD strip, the modal overlay and the popup host live in a
+	## CanvasLayer (ticket 04, ADR-0020) so hotel_world.gd's Camera2D --
+	## which now transforms every other CanvasItem in this viewport -- never
+	## pans or zooms them. Harmless when USE_HOTEL_WORLD is false too, since
+	## with no active Camera2D anywhere a CanvasLayer just renders 1:1.
+	var hud_layer := CanvasLayer.new()
+	add_child(hud_layer)
 
+	var top_bar := _build_top_bar()
+	var top_bar_backing := PanelContainer.new()
+	top_bar_backing.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	var backing_style := StyleBoxFlat.new()
+	backing_style.bg_color = Color(0, 0, 0, 0.55)
+	top_bar_backing.add_theme_stylebox_override("panel", backing_style)
+	top_bar_backing.add_child(top_bar)
+	hud_layer.add_child(top_bar_backing)
+
+	_build_overlay(hud_layer)
+
+	_popup_host = PopupHost.new()
+	hud_layer.add_child(_popup_host)
+
+	_refresh_top_bar()
+	set_process(true)
+
+
+## The pre-ADR-0020 Control/ScrollContainer view (ticket 02, ADR-0016),
+## unchanged except that the top bar it used to sit below has moved into
+## the HUD CanvasLayer built by _ready() -- this view now fills the whole
+## screen behind that overlay strip rather than sharing a VBoxContainer
+## with it.
+func _build_old_hotel_view() -> void:
 	var hotel_view := HotelView.new()
 	hotel_view.interactive = true
-	root.add_child(hotel_view)
+	hotel_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(hotel_view)
 
 	_hotel_panel = hotel_view.hotel_panel
 	_hotel_panel.slot_selected.connect(_on_hotel_slot_selected)
@@ -81,11 +127,10 @@ func _ready() -> void:
 	_station_panel.staffer_tapped.connect(_on_staffer_tapped)
 
 	## Screen-space overlay for the walk-in/persistent-occupant actors
-	## (ticket 04, ADR-0016) -- a sibling of root rather than a child of it,
-	## so it draws on top of every floor without taking a row in root's own
-	## vertical layout; mouse_filter IGNORE (set in its own _ready()) keeps
-	## it from ever intercepting a tap/drag meant for a RoomCellButton
-	## beneath it.
+	## (ticket 04, ADR-0016) -- a sibling of hotel_view rather than a child
+	## of it, so it draws on top of every floor; mouse_filter IGNORE (set in
+	## its own _ready()) keeps it from ever intercepting a tap/drag meant
+	## for a RoomCellButton beneath it.
 	_room_occupancy_layer = RoomOccupancyLayer.new()
 	_room_occupancy_layer.hotel_panel = _hotel_panel
 	_room_occupancy_layer.reception_panel = _reception_panel
@@ -108,14 +153,6 @@ func _ready() -> void:
 	_toast_layer.hotel_panel = _hotel_panel
 	_toast_layer.reception_panel = _reception_panel
 	add_child(_toast_layer)
-
-	_build_overlay()
-
-	_popup_host = PopupHost.new()
-	add_child(_popup_host)
-
-	_refresh_top_bar()
-	set_process(true)
 
 
 func _process(_delta: float) -> void:
@@ -161,6 +198,15 @@ func _build_top_bar() -> HBoxContainer:
 		Clock.set_speed(2.0)
 	)
 	bar.add_child(_fast_button)
+
+	## Ticket 04 (ADR-0020): the camera's "ease back to fit-all" control.
+	## Only meaningful with the Node2D world mounted -- the old view has no
+	## camera to reset.
+	if USE_HOTEL_WORLD:
+		_fit_all_button = Button.new()
+		_fit_all_button.text = "Fit All"
+		_fit_all_button.pressed.connect(func(): _hotel_world.ease_to_fit_all())
+		bar.add_child(_fit_all_button)
 
 	return bar
 
@@ -293,12 +339,12 @@ func _finish_seating_flow() -> void:
 
 ## --- Modal overlay (generic; auto-pauses the Clock while a menu is open) ---
 
-func _build_overlay() -> void:
+func _build_overlay(parent: Node) -> void:
 	_overlay = Control.new()
 	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_overlay.visible = false
 	_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(_overlay)
+	parent.add_child(_overlay)
 
 	var backdrop := ColorRect.new()
 	backdrop.color = Color(0, 0, 0, 0.5)
@@ -351,6 +397,13 @@ func close_menu() -> void:
 		_overlay_content.queue_free()
 		_overlay_content = null
 	Clock.set_paused(false)
-	_hotel_panel.refresh()
-	_station_panel.refresh()
-	_terrace_panel.refresh()
+	## Ticket 04 (ADR-0020): null with the world mounted -- none of these
+	## panels exist there yet (tickets 06-09), and nothing reachable in the
+	## world today opens a menu that would call close_menu() in the first
+	## place, but guard anyway rather than assume that stays true.
+	if _hotel_panel != null:
+		_hotel_panel.refresh()
+	if _station_panel != null:
+		_station_panel.refresh()
+	if _terrace_panel != null:
+		_terrace_panel.refresh()
