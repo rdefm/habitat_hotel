@@ -14,6 +14,7 @@ extends Node2D
 ## job -- this ticket only draws the shell, the floor signs, and the sky.
 
 const BuildingLayout = preload("res://sim/building_layout.gd")
+const CharacterSprite = preload("res://ui/character_sprite.gd")
 
 ## Most-zoomed-in Camera2D.zoom value this world allows. Confirmed
 ## empirically against this project's canvas_items+expand stretch setup
@@ -107,6 +108,8 @@ func _rebuild_building() -> void:
 	roof.position = Vector2(0, roof_bottom_y - BuildingLayout.ROOF_HEIGHT)
 	_building.add_child(roof)
 
+	_spawn_manny(floors)
+
 	_fit_all_zoom = _fit_zoom(BuildingLayout.fit_all_bounds(floors))
 
 
@@ -195,6 +198,32 @@ func _add_floor_sign(sign_text: String, top_y: float) -> void:
 	label.add_theme_constant_override("shadow_offset_x", 1)
 	label.add_theme_constant_override("shadow_offset_y", 1)
 	_building.add_child(label)
+
+
+## --- Manny (ticket 06, ADR-0015) ---
+##
+## Manny is the asset contract's reference implementation: his existing
+## walk sheet loads through resolve_character_sprite() exactly like any
+## other Staffer's would, proving the same resolver that falls back to a
+## placeholder for everyone else also renders a real animated sprite at
+## its contract footprint. "Standing somewhere in the world and moving"
+## (the ticket's own words) is his animated walk-cycle playing in place,
+## not a scripted patrol -- there is no wander behaviour and no ambient
+## behaviour scheduler (spec.md, Out of Scope). Placed at Reception's
+## staff nook, where Station.gd's Staff Pool -- Manny's real starting
+## state -- already loiters; real Station-post assignment and its
+## rendering, which would be what actually moves him, is ticket 07's job.
+## His "working" (sweep) alias resolves and renders through this exact
+## same path, verified directly rather than reproduced here: there's no
+## real Job driving which state should show until ticket 07/08 exist.
+func _spawn_manny(floors: Array) -> void:
+	var nook: Vector2 = BuildingLayout.resolve_anchor(floors, 0, "staff_nook")
+
+	var resolved := BuildingLayout.resolve_character_sprite("staffer", "manny", "walk")
+	var manny := CharacterSprite.new()
+	_building.add_child(manny)
+	manny.configure(resolved)
+	manny.position = nook
 
 
 func _make_sprite(filename: String) -> Sprite2D:

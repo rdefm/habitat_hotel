@@ -335,3 +335,189 @@ static func _resolve_local_point(floors_bottom_to_top: Array, i: int, local: Vec
 ## meets its anchors.
 static func _floor_top_y(floors_bottom_to_top: Array, i: int) -> float:
 	return floor_bottom_y(floors_bottom_to_top, i) - float(floors_bottom_to_top[i]["height"])
+
+
+## --- Character and interface slots (ticket 06) ---
+##
+## The same fallback rule ticket 05 established for the building shell
+## (missing asset -> placeholder of identical footprint, tinted and
+## labelled, resolved here rather than probed by the renderer) applied to
+## every character and interface slot: per-Species guest sprites,
+## per-Staffer sprites, Tag icons, mood faces, Station post props, and HUD
+## pills. docs/asset_contract.md documents the full contract; this is where
+## it resolves.
+
+## On-screen footprint AND canonical per-frame pixel size for a character
+## sheet reached through the open naming convention below -- chosen to
+## match both the 64x64 concept art already dropped under assets/ (pigeon,
+## penguin, tortoise) and the frame_w/frame_h the sprite-generation tool
+## that produced them already emits (see e.g. the metadata.json bundled in
+## assets/pigeon1_walk.zip). A convention-slot sheet therefore renders at
+## native size with no scaling. Manny's existing 256x256-frame sheets are a
+## one-time alias (CHARACTER_SPRITE_FILE, below) scaled down to this same
+## footprint at render time, exactly mirroring how ROOM_TYPE_INTERIOR_FILE
+## sits alongside resolve_room_interior()'s open convention slot.
+const CHARACTER_FRAME_SIZE := 64.0
+const CHARACTER_DIR := "res://assets/characters/"
+
+## Animation states named per kind (ticket 06): idle and walk are shared,
+## the third is a context state whose name depends on what's standing in
+## the slot -- "sleeping" for a Guest at Night, "working" for a Staffer at
+## their post. There is no wander behaviour and no ambient behaviour
+## scheduler; a slot is always in exactly one of these states.
+const CHARACTER_STATES := {
+	"guest": ["idle", "walk", "sleeping"],
+	"staffer": ["idle", "walk", "working"],
+}
+
+## One-time alias for Manny's existing walk/sweep sheets (ticket 02),
+## named and sized before this contract existed, so they can't follow the
+## "<kind>s/<id>_<state>.png" convention every other character gets for
+## free. No "idle" entry -- Manny has no idle sheet, so that state falls
+## through to the placeholder like any other character's would. This is
+## the ticket's own proof that a real asset loads through the exact same
+## resolver as a placeholder does, no special-cased rendering path.
+const CHARACTER_SPRITE_FILE := {
+	"staffer": {
+		"manny": {
+			"walk": {"file": "res://assets/Manny-walk.png", "frame_width": 256.0, "frame_height": 256.0},
+			"working": {"file": "res://assets/Manny-sweeping.png", "frame_width": 256.0, "frame_height": 256.0},
+		},
+	},
+}
+
+
+## Resolves a character slot (kind "guest"|"staffer", a Species/Staffer id,
+## and one of CHARACTER_STATES[kind]) to either a real sprite sheet or the
+## placeholder fallback. Checked in order, same shape as
+## resolve_room_interior():
+##  1. CHARACTER_SPRITE_FILE's one-time alias (Manny only today).
+##  2. The open naming convention -- "assets/characters/<kind>s/<id>_
+##     <state>.png" -- at the fixed CHARACTER_FRAME_SIZE per frame.
+##     `probe_fn` (real default: _probe_character_sheet_size(), checking
+##     the file exists and reading its real pixel size) resolves this;
+##     injectable so tests don't touch the filesystem.
+##  3. The tinted, labelled placeholder.
+## Returns {kind: "sprite", file, frame_width, frame_height, size} or
+## {kind: "placeholder", size, tint, label}. The renderer loads whatever
+## "file" this hands it and slices it into frame_width x frame_height
+## frames off the loaded texture's own real dimensions -- this function
+## never itself counts frames.
+static func resolve_character_sprite(kind: String, character_id: String, state: String, probe_fn: Callable = Callable()) -> Dictionary:
+	var alias: Dictionary = CHARACTER_SPRITE_FILE.get(kind, {}).get(character_id, {}).get(state, {})
+	if not alias.is_empty():
+		return _character_sprite_result(String(alias["file"]), float(alias["frame_width"]), float(alias["frame_height"]))
+
+	var conventional_path := "%s%ss/%s_%s.png" % [CHARACTER_DIR, kind, character_id, state]
+	var sheet_size = probe_fn.call(conventional_path) if probe_fn.is_valid() else _probe_character_sheet_size(conventional_path)
+	if sheet_size != null:
+		return _character_sprite_result(conventional_path, CHARACTER_FRAME_SIZE, CHARACTER_FRAME_SIZE)
+
+	return {
+		"kind": "placeholder",
+		"size": Vector2(CHARACTER_FRAME_SIZE, CHARACTER_FRAME_SIZE),
+		"tint": placeholder_tint_for_id(character_id),
+		"label": placeholder_label_for_id(character_id),
+	}
+
+
+static func _character_sprite_result(file: String, frame_width: float, frame_height: float) -> Dictionary:
+	return {
+		"kind": "sprite",
+		"file": file,
+		"frame_width": frame_width,
+		"frame_height": frame_height,
+		"size": Vector2(CHARACTER_FRAME_SIZE, CHARACTER_FRAME_SIZE),
+	}
+
+
+## Real (non-test) implementation of resolve_character_sprite()'s probe:
+## null if `path` doesn't exist, else its real pixel size (Vector2) so the
+## renderer can derive a dropped-in sheet's own column/row count rather
+## than assuming one.
+static func _probe_character_sheet_size(path: String):
+	if not ResourceLoader.exists(path):
+		return null
+	var texture: Texture2D = load(path)
+	if texture == null:
+		return null
+	return Vector2(texture.get_width(), texture.get_height())
+
+
+## Deterministic hash-derived tint for any id this contract has never heard
+## of -- same proof-of-generality resolve_room_interior()'s
+## DEFAULT_PLACEHOLDER_TINT makes, but as a formula rather than a table, so
+## it holds for all eight Species and every Staffer today without hand
+## -picking colors, and for whatever gets added later with no code change.
+static func placeholder_tint_for_id(id: String) -> Color:
+	## A 360-bucket hue (one degree each) collides too readily across even a
+	## handful of ids (confirmed empirically against the 8-Species roster) --
+	## spreading across a million buckets instead makes a collision
+	## practically impossible without hand-picking colors.
+	var hue: float = float(absi(id.hash()) % 1000000) / 1000000.0
+	return Color.from_hsv(hue, 0.55, 0.85)
+
+
+## Short label such as a species abbreviation (ticket 06) -- deliberately
+## temporary text standing in for a Guest's or Staffer's sprite until it
+## lands, same as a Room's placeholder carries its name.
+static func placeholder_label_for_id(id: String) -> String:
+	return id.substr(0, mini(3, id.length())).to_upper()
+
+
+## --- Tag icons, mood faces, Station props, HUD pills (ticket 06) ---
+##
+## Simpler single-frame slots -- no animation states -- sharing the same
+## alias-free "open naming convention, else placeholder" shape as
+## resolve_character_sprite()'s convention branch. None of these has a
+## real asset yet, so every one exercises the fallback today; landing a
+## correctly-sized file at its conventional path is all a future ticket
+## needs to do.
+
+const TAG_ICON_SIZE := 24.0
+const TAG_ICON_DIR := "res://assets/tags/"
+
+const MOOD_FACE_SIZE := 20.0
+const MOOD_FACE_DIR := "res://assets/moods/"
+## Mood tiers named after sim/patience_state.gd's PatienceState.tier()
+## return values, not CONTEXT.md's "content" prose gloss -- this is the
+## vocabulary the resolver is actually called with.
+const MOOD_FACE_TIERS := ["calm", "impatient", "huffy"]
+
+const STATION_PROP_SIZE := 40.0
+const STATION_PROP_DIR := "res://assets/stations/"
+
+const HUD_PILL_SIZE := Vector2(96.0, 28.0)
+const HUD_PILL_DIR := "res://assets/hud/"
+const HUD_PILL_IDS := ["cash", "hearts", "star", "calendar"]
+
+
+static func resolve_tag_icon(tag_id: String, probe_fn: Callable = Callable()) -> Dictionary:
+	return _resolve_static_icon(TAG_ICON_DIR, tag_id, Vector2(TAG_ICON_SIZE, TAG_ICON_SIZE), probe_fn)
+
+
+static func resolve_mood_face(tier: String, probe_fn: Callable = Callable()) -> Dictionary:
+	return _resolve_static_icon(MOOD_FACE_DIR, tier, Vector2(MOOD_FACE_SIZE, MOOD_FACE_SIZE), probe_fn)
+
+
+static func resolve_station_prop(station_id: String, probe_fn: Callable = Callable()) -> Dictionary:
+	return _resolve_static_icon(STATION_PROP_DIR, station_id, Vector2(STATION_PROP_SIZE, STATION_PROP_SIZE), probe_fn)
+
+
+static func resolve_hud_pill(pill_id: String, probe_fn: Callable = Callable()) -> Dictionary:
+	return _resolve_static_icon(HUD_PILL_DIR, pill_id, HUD_PILL_SIZE, probe_fn)
+
+
+## Shared by the four single-frame resolvers above: "<dir><id>.png", else
+## the tinted labelled placeholder at the same footprint. `probe_fn` (real
+## default: _probe_exists()) stands in for the filesystem check in tests.
+static func _resolve_static_icon(dir: String, id: String, size: Vector2, probe_fn: Callable) -> Dictionary:
+	var path := "%s%s.png" % [dir, id]
+	var exists: bool = probe_fn.call(path) if probe_fn.is_valid() else _probe_exists(path)
+	if exists:
+		return {"kind": "sprite", "file": path, "size": size}
+	return {"kind": "placeholder", "size": size, "tint": placeholder_tint_for_id(id), "label": placeholder_label_for_id(id)}
+
+
+static func _probe_exists(path: String) -> bool:
+	return ResourceLoader.exists(path)

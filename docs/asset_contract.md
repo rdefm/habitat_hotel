@@ -92,3 +92,39 @@ Every band shares the same x-range for its frame columns, elevator shaft and int
 | --- | --- | --- |
 | `bay_left` (rect) | `(168, 0)`–`(334.5, height)` | The floor's first Room bay. Height matches the floor's own (174 generic/painted-jungle, 131 for Ice Grotto, 158 for Roost Loft). |
 | `bay_right` (rect) | `(334.5, 0)`–`(501, height)` | The floor's second Room bay — meets `bay_left` with no gap. |
+
+## Character and interface slots (ticket 06)
+
+Resolved by `sim/building_layout.gd`'s `resolve_character_sprite()` (guests and Staffers) and its four single-frame siblings — `resolve_tag_icon()`, `resolve_mood_face()`, `resolve_station_prop()`, `resolve_hud_pill()`. Same fallback rule as the building shell: a missing slot renders a placeholder of identical footprint, tinted (`BuildingLayout.placeholder_tint_for_id()`, a deterministic hash-of-id color so it holds for every current and future id with no table to maintain) and labelled with a short abbreviation (`placeholder_label_for_id()`, the id's first three characters, uppercased). Every one of these slots is empty today except Manny — every Species and every other Staffer, every Tag icon, every mood face, every Station prop, and every HUD pill renders its placeholder.
+
+An anchor (the previous section) says *where* something stands; these slots say *what's drawn there*. Nothing here carries its own position.
+
+### Guest and Staffer sprites
+
+| Slot | File | Size (px) | Animation states |
+| --- | --- | --- | --- |
+| Guest (per Species, 8 total) | `assets/characters/guests/<species_id>_<state>.png` | 64×64 per frame, footprint 64×64 | `idle`, `walk`, `sleeping` |
+| Staffer (per Staffer, 3 total) | `assets/characters/staffers/<staffer_id>_<state>.png` | 64×64 per frame, footprint 64×64 | `idle`, `walk`, `working` |
+
+Frame count for a convention-slot sheet is never fixed — it's the dropped-in file's own width/height, each divided by 64. 64×64 is both the on-screen footprint and the canonical per-frame size a convention-slot sheet is cut to — chosen to match the concept art already under `assets/` (`pigeon1.png`, `penguin1.png`, `tortoise.png`, all 64×64) and the `frame_w`/`frame_h` the sprite-generation tool that produced them already emits (see `metadata.json` inside e.g. `assets/pigeon1_walk.zip`). A sheet dropped at the conventional path is sliced into that many 64×64 frames straight off its own loaded pixel size — no frame count is assumed. `assets/pigeon*`, `assets/penguin*`, `assets/tortoise*` are in-progress art-pipeline output, not yet cut to this convention's per-state file naming, and carry no slot yet.
+
+**Manny is the one alias**, not a convention-slot fit: his existing `assets/Manny-walk.png` (`walk`) and `assets/Manny-sweeping.png` (`working`) sheets — cut before this contract existed, at 256×256 per frame in a 5×5 grid — are fixed in `BuildingLayout.CHARACTER_SPRITE_FILE`, one-time the same way `ROOM_TYPE_INTERIOR_FILE` aliases the three painted Room interiors. They're scaled down to the same 64×64 footprint at render time. Manny has no `idle` sheet, so that one state falls through to the placeholder like any other character's would — proving the alias and the fallback share one resolver, not two code paths.
+
+Both families' animation states are idle, walk, and one context state — sleeping for a Guest at Night, working for a Staffer at their Station — per ADR-0015/ADR-0020. There is no wander behaviour and no ambient behaviour scheduler.
+
+### Tag icons, mood faces, Station props, HUD pills
+
+Single static frame each, no animation states — the fallback and naming-convention shape is identical to the guest/Staffer sprites' convention branch (`<dir><id>.png`, else the tinted labelled placeholder), just without a `<state>` suffix or a sheet to slice.
+
+| Slot | File | Size (px) | Ids |
+| --- | --- | --- | --- |
+| Tag icon (8) | `assets/tags/<tag_id>.png` | 24×24 | `data/tags.json`: `cold`, `warm`, `water`, `dry`, `high_perch`, `spacious`, `dark`, `quiet` |
+| Mood face (3) | `assets/moods/<tier>.png` | 20×20 | `sim/patience_state.gd`'s `PatienceState.tier()` values: `calm`, `impatient`, `huffy` |
+| Station post prop (3) | `assets/stations/<station_id>.png` | 40×40 | `sim/station.gd`'s `Station.IDS`: `reception`, `housekeeping`, `kitchen` |
+| HUD pill (4) | `assets/hud/<pill_id>.png` | 96×28 | `cash`, `hearts`, `star`, `calendar` |
+
+Mood faces are named after `PatienceState.tier()`'s actual return values (`calm`/`impatient`/`huffy`), not `CONTEXT.md`'s "content → impatient → huffy" prose gloss — this is the vocabulary the resolver is called with, since it's the vocabulary the existing Patience code already produces.
+
+### `character_idle.png`/`.webp` and the two UUID-named PNGs
+
+Unused leftovers with no code ever referencing them, predating this contract. Removed rather than left unreferenced — they get no slot.
