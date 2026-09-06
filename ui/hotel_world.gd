@@ -18,8 +18,16 @@ extends Node2D
 ## Ticket 10 adds every arriving Party standing in the lobby as one
 ## GuestActor per member, an always-visible mood face on every lobby guest
 ## and Terrace diner alike (souring as Patience decays), and a Needs bubble
-## of Tag icons popped by tapping a waiting lobby guest -- so only the Match
-## hint glow, drag/auto-pan, and the elevator remain later tickets' job.
+## of Tag icons popped by tapping a waiting lobby guest. Ticket 11 makes
+## that same tap-opened selection double as the seating gesture's first half
+## (ADR-0001/0009): tapping a lobby guest then tapping a Room bay, or
+## dragging a guest onto one, both seat the Party through the same
+## party_seat_attempted signal, with the selected Party's green/amber/none
+## Match hint glowing on every built bay (BuildingLayout.room_bay_match_hint(),
+## itself a thin wrapper over the existing Sim.match_hint() -- no hint logic
+## duplicated here). A guest drag also auto-pans the camera near the top/
+## bottom screen edge, so a lobby-to-top-floor drag is reachable at any
+## zoom. Only the elevator remains a later ticket's job.
 
 const BuildingLayout = preload("res://sim/building_layout.gd")
 const CharacterSprite = preload("res://ui/character_sprite.gd")
@@ -43,13 +51,16 @@ const ZOOM_STEP := 1.1
 const FIT_ALL_EASE_SECONDS := 0.4
 
 ## How far the pointer must move between press and release, in world units,
-## before a press counts as a drag rather than a tap. For a Staffer
-## pick-up: below this it's a tap (opens the detail popup), at or above it
-## it's a drag (drop against a Station post to (re)assign, or a no-op if
-## released elsewhere). For a Room bay press (ticket 08): the same
-## threshold gates whether a release fires room_slot_tapped at all -- there
-## is no bay drag yet (seating a guest by drag is ticket 11), so a press
-## that moves past it is simply abandoned rather than panning the camera.
+## before a press counts as a drag rather than a tap. For a Staffer or a
+## lobby guest pick-up: below this it's a tap (opens the detail popup, or
+## toggles the Needs bubble/selection), at or above it it's a drag (drop
+## against a Station post to (re)assign, or a built Room bay to seat --
+## ticket 11 -- or a no-op if released elsewhere). For an ordinary Room bay
+## press (ticket 08, no Party selected) or the tap-then-tap seating press
+## (ticket 11, a Party IS selected): the same threshold instead gates
+## whether a release fires anything at all, since neither has a drag of its
+## own -- a press that moves past it is simply abandoned rather than
+## panning the camera.
 const TAP_MOVEMENT_THRESHOLD := 6.0
 
 ## Generous drop-target box around a Station post's single anchor point
@@ -62,6 +73,17 @@ const STATION_POST_HIT_SIZE := Vector2(60.0, 60.0)
 ## frame and its mood face, which sits at GuestActor.MOOD_FACE_OFFSET, so
 ## the bubble never overlaps either.
 const NEEDS_BUBBLE_OFFSET := Vector2(0.0, -BuildingLayout.CHARACTER_FRAME_SIZE - BuildingLayout.MOOD_FACE_SIZE - 8.0)
+
+## Ticket 11: while a guest (or Staffer) drag is in progress, holding the
+## pointer within this many screen pixels of the viewport's top or bottom
+## edge pans the camera toward that edge at AUTO_PAN_SPEED world units per
+## second -- scaled by the current zoom, same screen-delta-to-world-delta
+## division _pan_by() already uses, so the pan speed reads as constant on
+## screen regardless of zoom level. Chosen over easing to fit-all on pickup
+## (spec.md's "Further Notes": a known trade-off -- a long traverse is slow
+## and the target floor isn't visible until it scrolls in).
+const AUTO_PAN_EDGE_ZONE := 60.0
+const AUTO_PAN_SPEED := 500.0
 
 ## Emitted whenever a Staffer is tapped (a press/release with no drag) so
 ## main_screen can open their existing Skill/Trait detail popup -- same
@@ -80,6 +102,15 @@ signal room_slot_tapped(room_type_id: String, instance_id: int)
 ## Terrace menu, same contract as ui/terrace_panel.gd's retired
 ## terrace_tapped signal.
 signal terrace_tapped
+
+## Emitted whenever a seating gesture (a guest tap-then-bay-tap in
+## _on_press()/_on_release(), or a guest dragged onto a bay via
+## _attempt_seat_drop()) lands on a valid Match hint (ticket 11,
+## ADR-0001/0009) -- hint is "green" or "amber", never "none" (an unseatable
+## bay is never a tap/drop target in the first place). main_screen decides
+## what "amber" means (the existing seat-confirm modal) and calls
+## Sim.seat_party() itself; this world never seats a Party on its own.
+signal party_seat_attempted(party_id: int, room_type_id: String, instance_id: int, hint: String)
 
 ## Sky tint per Clock.Phase (autoload/clock.gd), keyed by the enum's plain
 ## int value (MORNING=0, MIDDAY=1, EVENING=2, NIGHT=3) rather than the enum
@@ -145,17 +176,28 @@ var _cached_lobby_signature := ""
 var _needs_bubble: NeedsBubble = null
 var _needs_bubble_key := ""
 
-## Non-empty while a press has landed on a lobby GuestActor, awaiting
-## release to decide tap vs. abandoned press -- same TAP_MOVEMENT_THRESHOLD
-## -gated shape as _press_bay_actor/_press_terrace below. A String key, not
-## a GuestActor reference: unlike a Staffer or a Room bay, a lobby guest's
-## actor can be freed and recreated mid-press by _rebuild_lobby_guests()
-## (Patience decaying every tick churns this dictionary far more often than
-## Stations or hotel_rooms change), so releasing resolves the key against
-## _lobby_guest_actors fresh rather than holding a node that might already
-## be freed.
-var _press_guest_key := ""
-var _press_guest_start_world := Vector2.ZERO
+## Ticket 11: the party_id whose Needs bubble is currently open, if any --
+## kept alongside _needs_bubble_key (which names the specific MEMBER the
+## bubble is anchored to) since the Match hint glow and a seating attempt
+## are both keyed on the whole Party, not one member. -1 means no Party is
+## selected: every built bay's glow is "none" and a bay tap falls through to
+## its normal (non-seating) tap behaviour. Set/cleared together with the
+## bubble by _select_guest()/_close_needs_bubble().
+var _selected_party_id := -1
+
+## Non-empty while a lobby guest is picked up (press landed on a GuestActor's
+## hit_rect()) -- the "<party_id>:<member_index>" key being dragged (a
+## String, not a GuestActor reference, for the same reason
+## _guest_key_at()'s caller resolves fresh below: _rebuild_lobby_guests()
+## can free and recreate this actor mid-press since Patience decays every
+## tick), its press-time world position (the tap-vs-drag threshold), and
+## whether that guest's Party was ALREADY selected before this press (so
+## release can tell "first tap, opened it" from "second tap, close it" --
+## see _end_guest_drag()). Mutually exclusive with camera panning, a Staffer
+## drag, and a Room bay press, same as every other gesture in this file.
+var _drag_guest_key := ""
+var _drag_guest_start_world := Vector2.ZERO
+var _drag_guest_already_selected := false
 
 ## Non-empty while a Staffer is picked up (press landed on a StafferActor's
 ## hit_rect()) -- the id being dragged, its press-time world position (for
@@ -164,15 +206,35 @@ var _press_guest_start_world := Vector2.ZERO
 ## a press either starts one or the other, never both.
 var _drag_staffer_id := ""
 var _drag_start_world := Vector2.ZERO
+## Shared by a Staffer drag and a guest drag (never both at once) -- the
+## semi-transparent ghost sprite following the pointer.
 var _drag_preview: CharacterSprite = null
 
+## The last press/motion/drag event's SCREEN-space position (not world --
+## get_viewport_rect()'s own space, ticket 11's auto-pan edge check), kept
+## for _auto_pan_if_near_edge() to poll every _process() tick rather than
+## only on the input events that update it, since a stationary held pointer
+## produces no further motion events of its own.
+var _last_pointer_screen := Vector2.ZERO
+
 ## Non-null while a press has landed on a tappable Room bay (a Build Slot
-## or a built Room, never an empty shell), awaiting release to decide tap
-## vs. abandoned press (see TAP_MOVEMENT_THRESHOLD's comment). Mutually
-## exclusive with both camera panning and a Staffer drag, same as those two
-## already are with each other.
+## or a built Room, never an empty shell) with NO Party currently selected,
+## awaiting release to decide tap vs. abandoned press (see
+## TAP_MOVEMENT_THRESHOLD's comment). Mutually exclusive with both camera
+## panning and a Staffer drag, same as those two already are with each
+## other. See _press_seat_bay_actor below for the selected-Party case.
 var _press_bay_actor: RoomBayActor = null
 var _press_bay_start_world := Vector2.ZERO
+
+## Ticket 11: non-null while a press has landed on a built Room bay that is
+## a valid Match hint target (green or amber) for the currently selected
+## Party -- the tap-then-tap half of ADR-0001/0009's seating gesture,
+## coexisting with _press_bay_actor's ordinary build/inspect tap above (the
+## two are mutually exclusive per press: see _on_press()). Awaiting release
+## to decide tap vs. abandoned press, same TAP_MOVEMENT_THRESHOLD gate as
+## every other press in this file.
+var _press_seat_bay_actor: RoomBayActor = null
+var _press_seat_bay_start_world := Vector2.ZERO
 
 ## Non-empty while a press has landed on the Terrace's signage tap target,
 ## awaiting release to decide tap vs. abandoned press -- same
@@ -209,8 +271,11 @@ func _ready() -> void:
 	set_process_unhandled_input(true)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_update_sky_tint()
+
+	if _drag_staffer_id != "" or _drag_guest_key != "":
+		_auto_pan_if_near_edge(delta)
 
 	var floor_count := BuildingLayout.unlocked_room_type_ids_ascending(GameState.rooms, GameState.stars).size()
 	if floor_count != _cached_floor_count:
@@ -462,6 +527,21 @@ func _rebuild_room_bays(floors: Array) -> void:
 			_room_bay_actors["%s:%d" % [room_type_id, bay_index]] = actor
 
 	_cached_rooms_signature = str(GameState.hotel_rooms)
+	_refresh_bay_match_hints()
+
+
+## Ticket 11: re-applies the currently selected Party's Match hint glow to
+## every built Room bay actor (RoomBayActor.set_match_hint(), which updates
+## in place rather than tearing anything down) -- called both after a
+## structural bay rebuild (a build/checkout/clean/upgrade could change which
+## Rooms are even valid targets) and whenever the selection itself changes
+## (a guest tap or pick-up, or the bubble closing). _selected_party_id == -1
+## resolves every bay to "none" via BuildingLayout.room_bay_match_hint()'s
+## own early-out, clearing every glow with no Sim.match_hint() calls at all.
+func _refresh_bay_match_hints() -> void:
+	for actor in _room_bay_actors.values():
+		if actor.state == "built":
+			actor.set_match_hint(BuildingLayout.room_bay_match_hint(_selected_party_id, actor.room_type_id, actor.instance_id))
 
 
 ## --- Terrace: signage tap target, and diner placement (ticket 09) ---
@@ -499,16 +579,22 @@ func _dining_signature() -> String:
 	return str(Sim.walkin_queue) + "|" + str(Sim.dinner_jobs())
 
 
-## --- Lobby guests: mood faces and Needs bubbles (ticket 10) ---
+## --- Lobby guests: mood faces, Needs bubbles, and selection (tickets 10/11) ---
 ##
 ## An arriving Party stands in the lobby as one GuestActor per member
 ## (sim/building_layout.gd's lobby_guest_placements()), each carrying an
 ## always-visible mood face that sours as its own Party's Patience decays
 ## (BuildingLayout.resolve_mood_face_for_patience(), GameState.balance's
 ## "patience" block -- the same config Sim._decay_patience() decays
-## pending_arrivals against). Tapping one pops a Needs bubble of Tag icons
-## for its Party (_toggle_needs_bubble()); Rooms glowing green/amber for the
-## selected Party and dragging a guest to seat them are ticket 11's job.
+## pending_arrivals against).
+##
+## Picking a guest up -- by a tap or the start of a drag, ADR-0009's "both
+## gestures put the Party into the same selected state" -- pops a Needs
+## bubble of Tag icons for its Party and glows every built bay's Match hint
+## (_select_guest(), _refresh_bay_match_hints()). A tap that lands on an
+## already-selected guest closes it again (_end_guest_drag()); tapping a
+## different guest, or dragging one onto a bay, are handled by the
+## tap/drag gesture code below.
 
 func _lobby_signature() -> String:
 	return str(Sim.pending_arrivals)
@@ -558,15 +644,14 @@ func _guest_key_at(world_pos: Vector2) -> String:
 	return ""
 
 
-## Opens a Needs bubble for the guest at `key`, or closes it if that guest's
-## bubble is already the one showing -- a second tap on the same guest
-## toggles it shut. A no-op if `key` no longer names a live guest (its
-## Party resolved between press and release).
-func _toggle_needs_bubble(key: String) -> void:
-	if _needs_bubble != null and _needs_bubble_key == key:
-		_close_needs_bubble()
-		return
-
+## Opens (or refreshes) a Needs bubble for the guest at `key` and selects
+## its whole Party for seating -- idempotent, so re-selecting the
+## already-open guest (e.g. _begin_guest_drag() unconditionally calling this
+## on every press, including a second tap meant to close it) just
+## reconfigures the same bubble in place rather than flickering it shut and
+## open again. A no-op if `key` no longer names a live guest (its Party
+## resolved between press and release).
+func _select_guest(key: String) -> void:
 	if not _lobby_guest_actors.has(key):
 		return
 	var actor: GuestActor = _lobby_guest_actors[key]
@@ -580,6 +665,8 @@ func _toggle_needs_bubble(key: String) -> void:
 	_needs_bubble.configure((party["needs"] as Array).duplicate())
 	_needs_bubble.position = actor.position + NEEDS_BUBBLE_OFFSET
 	_needs_bubble_key = key
+	_selected_party_id = actor.party_id
+	_refresh_bay_match_hints()
 
 
 func _close_needs_bubble() -> void:
@@ -587,6 +674,8 @@ func _close_needs_bubble() -> void:
 		_needs_bubble.queue_free()
 		_needs_bubble = null
 	_needs_bubble_key = ""
+	_selected_party_id = -1
+	_refresh_bay_match_hints()
 
 
 ## --- Staffer tap/drag (ticket 07) ---
@@ -637,7 +726,9 @@ func _begin_staffer_drag(staffer_id: String, world_pos: Vector2) -> void:
 	_drag_preview.position = world_pos
 
 
-func _update_staffer_drag(world_pos: Vector2) -> void:
+## Shared by a Staffer drag and a guest drag (ticket 11) -- both just follow
+## the pointer with a semi-transparent ghost sprite.
+func _update_drag_preview(world_pos: Vector2) -> void:
 	if _drag_preview != null:
 		_drag_preview.position = world_pos
 
@@ -663,6 +754,72 @@ func _end_staffer_drag(world_pos: Vector2) -> void:
 			Sim.assign_staffer(staffer_id, station_id)
 	else:
 		staffer_tapped.emit(staffer_id)
+
+
+## --- Guest tap/drag and seating (ticket 11, ADR-0001/0009) ---
+##
+## Same hand-rolled world-space-rect shape as the Staffer drag above, and
+## the same tap-vs-drag threshold: a press on a lobby GuestActor always
+## selects its Party immediately (_select_guest(), so the Needs bubble and
+## every built bay's Match hint glow appear from the very first frame of a
+## potential drag, per ADR-0009's "picking up a Party in a drag puts it into
+## the same selected state a tap produces"). Release then decides what the
+## press meant: moved past the threshold is a drop attempt against whatever
+## built bay is under the pointer (_attempt_seat_drop()); an unmoved press
+## on a guest whose Party was ALREADY selected before this press closes the
+## bubble again (the ticket 10 toggle-shut gesture); an unmoved press that
+## just opened a new selection leaves it open, since _select_guest() already
+## did that work at press time.
+
+func _begin_guest_drag(key: String, world_pos: Vector2) -> void:
+	_drag_guest_key = key
+	_drag_guest_start_world = world_pos
+	_drag_guest_already_selected = _needs_bubble != null and _needs_bubble_key == key
+
+	var actor: GuestActor = _lobby_guest_actors[key]
+	var species_id: String = String(Sim.pending_party(actor.party_id).get("species_id", ""))
+	_drag_preview = CharacterSprite.new()
+	add_child(_drag_preview)
+	_drag_preview.configure(BuildingLayout.resolve_character_sprite("guest", species_id, "idle"))
+	_drag_preview.modulate.a = 0.7
+	_drag_preview.position = world_pos
+
+	_select_guest(key)
+
+
+func _end_guest_drag(world_pos: Vector2) -> void:
+	var key := _drag_guest_key
+	var moved := world_pos.distance_to(_drag_guest_start_world) >= TAP_MOVEMENT_THRESHOLD
+	var already_selected := _drag_guest_already_selected
+
+	_drag_guest_key = ""
+	if _drag_preview != null:
+		_drag_preview.queue_free()
+		_drag_preview = null
+
+	if moved:
+		_attempt_seat_drop(key, world_pos)
+	elif already_selected:
+		_close_needs_bubble()
+
+
+## The drag half of the seating gesture: a release that moved past the
+## threshold, dropped over a built Room bay whose Match hint for this Party
+## isn't "none". Anything else -- released over a Build Slot, an empty
+## shell, or open space -- is simply abandoned, same as every other drag in
+## this file that misses its target; the guest stays put (a rebuild redraws
+## it back at its lobby queue position on the next tick).
+func _attempt_seat_drop(key: String, world_pos: Vector2) -> void:
+	if not _lobby_guest_actors.has(key):
+		return
+	var party_id: int = _lobby_guest_actors[key].party_id
+	var bay := _tappable_room_bay_at(world_pos)
+	if bay == null or bay.state != "built":
+		return
+	var hint := BuildingLayout.room_bay_match_hint(party_id, bay.room_type_id, bay.instance_id)
+	if hint == "none":
+		return
+	party_seat_attempted.emit(party_id, bay.room_type_id, bay.instance_id, hint)
 
 
 func _make_sprite(filename: String) -> Sprite2D:
@@ -737,13 +894,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
 			_zoom_by(1.0 / ZOOM_STEP)
 		elif event.button_index == MOUSE_BUTTON_LEFT:
+			_last_pointer_screen = event.position
 			if event.pressed:
 				_on_press(get_global_mouse_position())
 			else:
 				_on_release(get_global_mouse_position())
 	elif event is InputEventMouseMotion:
-		if _drag_staffer_id != "":
-			_update_staffer_drag(get_global_mouse_position())
+		_last_pointer_screen = event.position
+		if _drag_staffer_id != "" or _drag_guest_key != "":
+			_update_drag_preview(get_global_mouse_position())
 		elif _dragging:
 			_pan_by(event.relative)
 	elif event is InputEventMagnifyGesture:
@@ -752,39 +911,52 @@ func _unhandled_input(event: InputEvent) -> void:
 		## multiplying zoom UP, not down.
 		_zoom_by(event.factor)
 	elif event is InputEventScreenTouch:
+		_last_pointer_screen = event.position
 		if event.pressed:
 			_on_press(get_global_mouse_position())
 		else:
 			_on_release(get_global_mouse_position())
 	elif event is InputEventScreenDrag:
-		if _drag_staffer_id != "":
-			_update_staffer_drag(get_global_mouse_position())
+		_last_pointer_screen = event.position
+		if _drag_staffer_id != "" or _drag_guest_key != "":
+			_update_drag_preview(get_global_mouse_position())
 		else:
 			_pan_by(event.relative)
 
 
 ## Shared press handler for a mouse-left-button or touch-down event: if it
-## landed on a Staffer, that starts a Staffer drag/tap instead of a camera
-## pan (see the header comment above _staffer_at()).
+## landed on a lobby guest or a Staffer, that starts that actor's own
+## drag/tap instead of a camera pan (see the header comments above
+## _staffer_at() and the guest tap/drag section).
 func _on_press(world_pos: Vector2) -> void:
-	## "Tapping elsewhere" closes whatever Needs bubble is open (ticket 10):
-	## computed once up front so every other branch below -- a Staffer, a
-	## Room bay, the Terrace signage, or empty space starting a camera pan --
-	## counts as elsewhere. A press that lands back on the bubble's own guest
-	## leaves it alone here; _toggle_needs_bubble() (called from _on_release())
-	## decides whether that re-tap closes or just re-confirms it.
 	var guest_key := _guest_key_at(world_pos)
-	if guest_key == "" and _needs_bubble != null:
+	if guest_key != "":
+		_begin_guest_drag(guest_key, world_pos)
+		return
+
+	## A Party is selected (ticket 11): a press on any Room bay is claimed
+	## by the tap-then-tap half of the seating gesture, whether or not it's
+	## actually a valid target -- a Build Slot or a "none"-hint Room while
+	## selected does not respond to a tap at all (ui/hotel_panel.gd's
+	## pre-existing _on_cell_pressed() rule under ADR-0001, unchanged here:
+	## it is simply consumed with the selection left exactly as it was, not
+	## treated as "elsewhere" and not falling through to the ordinary
+	## build/inspect tap below). Anything else -- a Staffer, the
+	## Terrace, or empty space -- closes the selection first and then falls
+	## through to its own normal handling below, same as ticket 10's
+	## "tapping elsewhere closes the bubble".
+	if _selected_party_id != -1:
+		var bay := _tappable_room_bay_at(world_pos)
+		if bay != null:
+			if bay.state == "built" and BuildingLayout.room_bay_match_hint(_selected_party_id, bay.room_type_id, bay.instance_id) != "none":
+				_press_seat_bay_actor = bay
+				_press_seat_bay_start_world = world_pos
+			return
 		_close_needs_bubble()
 
 	var staffer_id := _staffer_at(world_pos)
 	if staffer_id != "":
 		_begin_staffer_drag(staffer_id, world_pos)
-		return
-
-	if guest_key != "":
-		_press_guest_key = guest_key
-		_press_guest_start_world = world_pos
 		return
 
 	var bay := _tappable_room_bay_at(world_pos)
@@ -804,10 +976,14 @@ func _on_press(world_pos: Vector2) -> void:
 func _on_release(world_pos: Vector2) -> void:
 	if _drag_staffer_id != "":
 		_end_staffer_drag(world_pos)
-	elif _press_guest_key != "":
-		if world_pos.distance_to(_press_guest_start_world) < TAP_MOVEMENT_THRESHOLD:
-			_toggle_needs_bubble(_press_guest_key)
-		_press_guest_key = ""
+	elif _drag_guest_key != "":
+		_end_guest_drag(world_pos)
+	elif _press_seat_bay_actor != null:
+		if world_pos.distance_to(_press_seat_bay_start_world) < TAP_MOVEMENT_THRESHOLD:
+			var hint := BuildingLayout.room_bay_match_hint(_selected_party_id, _press_seat_bay_actor.room_type_id, _press_seat_bay_actor.instance_id)
+			if hint != "none":
+				party_seat_attempted.emit(_selected_party_id, _press_seat_bay_actor.room_type_id, _press_seat_bay_actor.instance_id, hint)
+		_press_seat_bay_actor = null
 	elif _press_bay_actor != null:
 		if world_pos.distance_to(_press_bay_start_world) < TAP_MOVEMENT_THRESHOLD:
 			room_slot_tapped.emit(_press_bay_actor.room_type_id, _press_bay_actor.instance_id)
@@ -828,3 +1004,19 @@ func _zoom_by(factor: float) -> void:
 
 func _pan_by(screen_delta: Vector2) -> void:
 	_camera.position -= screen_delta / _camera.zoom
+
+
+## Ticket 11: while a guest or Staffer drag is in progress, holding the
+## pointer near the viewport's top or bottom edge pans the camera toward it
+## at a steady rate -- see AUTO_PAN_EDGE_ZONE/AUTO_PAN_SPEED's comment.
+## Division by _camera.zoom.y mirrors _pan_by()'s own screen-to-world
+## conversion, so the pan reads as the same on-screen speed at any zoom.
+func _auto_pan_if_near_edge(delta: float) -> void:
+	var viewport_height := get_viewport_rect().size.y
+	if viewport_height <= 0.0:
+		return
+	var world_delta: float = AUTO_PAN_SPEED * delta / _camera.zoom.y
+	if _last_pointer_screen.y < AUTO_PAN_EDGE_ZONE:
+		_camera.position.y -= world_delta
+	elif _last_pointer_screen.y > viewport_height - AUTO_PAN_EDGE_ZONE:
+		_camera.position.y += world_delta

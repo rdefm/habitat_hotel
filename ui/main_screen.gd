@@ -77,6 +77,7 @@ func _ready() -> void:
 		_hotel_world.staffer_tapped.connect(_on_staffer_tapped)
 		_hotel_world.room_slot_tapped.connect(_on_hotel_slot_selected)
 		_hotel_world.terrace_tapped.connect(_on_terrace_tapped)
+		_hotel_world.party_seat_attempted.connect(_on_world_seat_attempted)
 	else:
 		_build_old_hotel_view()
 
@@ -343,6 +344,34 @@ func _finish_seating_flow() -> void:
 	_reception_panel.clear_selection()
 	_hotel_panel.selected_party_id = -1
 	_hotel_panel.refresh()
+
+
+## --- The Node2D world's own seating gesture (ticket 11, ADR-0001/0009) ---
+##
+## ui/hotel_world.gd's own tap-then-tap (a lobby guest, then a Room bay) and
+## drag-a-guest-onto-a-bay gestures both funnel here via party_seat_attempted
+## -- same green-auto-seats/amber-opens-the-confirm-modal split as the old
+## view's _on_seat_attempted() above, but written fresh rather than reused:
+## that handler leans on _hotel_panel/_reception_panel (the tap-selection
+## state and the dinner-addon checkbox), neither of which exists under
+## USE_HOTEL_WORLD. The world clears its own selection/Needs-bubble state on
+## the next rebuild once the seated Party leaves Sim.pending_arrivals, so
+## there is nothing for this handler to reset itself.
+func _on_world_seat_attempted(party_id: int, room_type_id: String, instance_id: int, hint: String) -> void:
+	var dinner_addon := bool(Sim.pending_party(party_id).get("dinner_addon", false))
+	if hint == "green":
+		Sim.seat_party(party_id, room_type_id, instance_id, dinner_addon)
+		return
+
+	var menu := SeatConfirmMenu.new()
+	menu.party_id = party_id
+	menu.room_type_id = room_type_id
+	menu.instance_id = instance_id
+	menu.dinner_addon = dinner_addon
+	menu.resolved.connect(func(_seated: bool):
+		_popup_host.close_popup()
+	)
+	_popup_host.open_popup(menu)
 
 
 ## --- Modal overlay (generic; auto-pauses the Clock while a menu is open) ---

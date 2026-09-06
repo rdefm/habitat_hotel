@@ -836,3 +836,23 @@ static func lobby_guest_placements(pending_arrivals: Array) -> Array:
 ## reasoning resolve_station_post_anchor() already relies on.
 static func resolve_lobby_guest_point(floors_bottom_to_top: Array, queue_index: int) -> Vector2:
 	return resolve_lobby_queue_point(floors_bottom_to_top, GROUND_FLOOR_LEVEL, queue_index)
+
+
+## --- Match hints (ticket 11) ---
+##
+## Whether a built bay's Room glows for the Party currently selected by a
+## lobby-guest tap or drag (ADR-0001/0009: "the seating decision made
+## against the building itself") -- green if every Need is covered, amber
+## for a seatable-but-mismatched Room, "none" (no glow) for anything that
+## isn't a valid seating target at all. Not re-derived here: `hint_fn` (real
+## default: Sim.match_hint(), the single authority per spec.md's "Match
+## hints are not re-derived") is called for a real selection, same
+## injectable-probe shape as resolve_room_interior()'s probe_fn elsewhere in
+## this file -- tests pass a literal-returning Callable so this stays a
+## RefCounted of pure functions with no autoload dependency of its own.
+## selected_party_id == -1 (nothing tapped or picked up) always answers
+## "none" with no call at all, since there's nothing to hint against.
+static func room_bay_match_hint(selected_party_id: int, room_type_id: String, instance_id: int, hint_fn: Callable = Callable()) -> String:
+	if selected_party_id == -1:
+		return "none"
+	return hint_fn.call(selected_party_id, room_type_id, instance_id) if hint_fn.is_valid() else Sim.match_hint(selected_party_id, room_type_id, instance_id)

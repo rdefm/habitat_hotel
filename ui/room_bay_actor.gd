@@ -11,7 +11,9 @@ extends Node2D
 ## ui/hotel_world.gd owns tap hit-testing against hit_rect() and the actual
 ## GameState/Sim call a tap resolves to (opening the build-confirm flow or
 ## the stay-info modal); this class only draws and reports its own
-## footprint, same division of labour as ui/staffer_actor.gd.
+## footprint, same division of labour as ui/staffer_actor.gd. Ticket 11
+## reuses that same hit_rect() as the drop target for seating a dragged
+## guest, and adds set_match_hint() for the green/amber Match hint glow.
 
 const CharacterSprite = preload("res://ui/character_sprite.gd")
 const BuildingLayout = preload("res://sim/building_layout.gd")
@@ -19,6 +21,18 @@ const BuildingLayout = preload("res://sim/building_layout.gd")
 const BUILD_SLOT_TINT := Color(0.3, 0.65, 0.35, 0.4)
 const EMPTY_SHELL_TINT := Color(0.05, 0.05, 0.05, 0.5)
 const BUILT_TINT := Color(0, 0, 0, 0)
+
+## Ticket 11's Match hint glow, drawn as a translucent overlay above a built
+## bay's own content (so a door plate/upgrade prop under it stays legible)
+## rather than replacing _background's tint -- a bay's occupancy/dirt/
+## upgrade state and its Match hint are two independent things that can
+## both be true at once (a dirty-but-vacant Room can still glow). Keyed by
+## MatchHint's own "green"/"amber" vocabulary; "none" (or any other value)
+## clears the glow rather than drawing one.
+const MATCH_HINT_COLORS := {
+	"green": Color(0.4, 1.0, 0.4, 0.45),
+	"amber": Color(1.0, 0.75, 0.3, 0.45),
+}
 
 ## Room type id and bay state this actor is currently showing -- read by
 ## ui/hotel_world.gd's hit-testing to decide what a tap on this bay means
@@ -30,6 +44,7 @@ var instance_id: int = -1
 
 var _bay_size := Vector2.ZERO
 var _background: ColorRect
+var _glow: ColorRect = null
 
 
 func configure(new_room_type_id: String, bay_state: Dictionary, bay_size: Vector2, room_number: int, visual_state: Dictionary) -> void:
@@ -62,6 +77,28 @@ func configure(new_room_type_id: String, bay_state: Dictionary, bay_size: Vector
 
 func hit_rect() -> Rect2:
 	return Rect2(global_position, _bay_size)
+
+
+## Ticket 11: applies (or clears) the Match hint glow for whatever Party is
+## currently selected/dragged -- called independently of configure(), which
+## only runs on a structural rebuild (a build/checkout/clean/upgrade), so a
+## guest tap or pick-up can re-glow every built bay without tearing down and
+## recreating its whole subtree. `hint` is BuildingLayout.room_bay_match_hint()'s
+## own vocabulary; anything not in MATCH_HINT_COLORS (typically "none")
+## clears an existing glow instead of drawing one.
+func set_match_hint(hint: String) -> void:
+	if not MATCH_HINT_COLORS.has(hint):
+		if _glow != null:
+			_glow.queue_free()
+			_glow = null
+		return
+
+	if _glow == null:
+		_glow = ColorRect.new()
+		_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_glow.size = _bay_size
+		add_child(_glow)
+	_glow.color = MATCH_HINT_COLORS[hint]
 
 
 func _add_door_plate(room_number: int) -> void:
