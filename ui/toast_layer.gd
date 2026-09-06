@@ -56,6 +56,7 @@ extends Control
 const DemandFormat = preload("res://ui/demand_format.gd")
 const HotelPanel = preload("res://ui/hotel_panel.gd")
 const ReceptionPanel = preload("res://ui/reception_panel.gd")
+const TerracePanel = preload("res://ui/terrace_panel.gd")
 const HotelWorld = preload("res://ui/hotel_world.gd")
 const BuildingLayout = preload("res://sim/building_layout.gd")
 const MatchHint = preload("res://sim/match_hint.gd")
@@ -80,6 +81,10 @@ const EDGE_MARKER_SIZE := Vector2(32.0, 32.0)
 ## ui/room_occupancy_layer.gd's own convention. Control mode only.
 var hotel_panel: HotelPanel
 var reception_panel: ReceptionPanel
+## Ticket 15: Control mode's own Terrace anchor, for the dining events that
+## never had a toast before this ticket in either mode -- mirrors
+## reception_panel's role for RECEPTION_ANCHOR_KEY.
+var terrace_panel: TerracePanel
 
 ## Set by main_screen for world mode (ticket 15) instead of the two above.
 ## Exactly one of this and hotel_panel/reception_panel is set for the
@@ -277,11 +282,14 @@ func _room_anchor_key(room_type_id: String, instance_id: int) -> String:
 	return "room|" + MatchHint.room_key({"room_type_id": room_type_id, "instance_id": instance_id})
 
 
-## Falls back to Reception whenever a Room-cell anchor can't be resolved --
-## the Room's floor hasn't been unlocked-scrolled into view, or a
-## HotelPanel.refresh() rebuild hasn't recreated the cell for this frame
-## yet -- so a toast is never simply left un-positioned. Control mode only.
+## Falls back to Reception whenever a Room-cell or Terrace anchor can't be
+## resolved -- the Room's floor hasn't been unlocked-scrolled into view, a
+## HotelPanel.refresh() rebuild hasn't recreated the cell for this frame yet,
+## or terrace_panel was never wired -- so a toast is never simply left
+## un-positioned. Control mode only.
 func _anchor_position(anchor_key: String) -> Vector2:
+	if anchor_key == TERRACE_ANCHOR_KEY and terrace_panel != null:
+		return _to_local(terrace_panel.get_global_rect().get_center())
 	if anchor_key != RECEPTION_ANCHOR_KEY and hotel_panel != null:
 		var room_key := anchor_key.trim_prefix("room|")
 		var parts := room_key.split("#")

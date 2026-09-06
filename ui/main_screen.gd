@@ -109,6 +109,7 @@ func _ready() -> void:
 	else:
 		_toast_layer.hotel_panel = _hotel_panel
 		_toast_layer.reception_panel = _reception_panel
+		_toast_layer.terrace_panel = _terrace_panel
 	hud_layer.add_child(_toast_layer)
 
 	set_process(true)
