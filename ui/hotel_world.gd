@@ -14,15 +14,20 @@ extends Node2D
 ## staff nook. Ticket 08 adds every Room floor's two bays -- a built Room,
 ## a Build Slot, or an empty shell, tappable via room_slot_tapped. Ticket 09
 ## adds the Terrace's signage (tappable via terrace_tapped) and every
-## Walk-in Diner/Dining Party standing at the pass or the entrance queue --
-## so only lobby guest sprites, the Match hint glow, and the elevator
-## remain later tickets' job.
+## Walk-in Diner/Dining Party standing at the pass or the entrance queue.
+## Ticket 10 adds every arriving Party standing in the lobby as one
+## GuestActor per member, an always-visible mood face on every lobby guest
+## and Terrace diner alike (souring as Patience decays), and a Needs bubble
+## of Tag icons popped by tapping a waiting lobby guest -- so only the Match
+## hint glow, drag/auto-pan, and the elevator remain later tickets' job.
 
 const BuildingLayout = preload("res://sim/building_layout.gd")
 const CharacterSprite = preload("res://ui/character_sprite.gd")
 const StafferActor = preload("res://ui/staffer_actor.gd")
 const RoomBayActor = preload("res://ui/room_bay_actor.gd")
 const DinerActor = preload("res://ui/diner_actor.gd")
+const GuestActor = preload("res://ui/guest_actor.gd")
+const NeedsBubble = preload("res://ui/needs_bubble.gd")
 const Station = preload("res://sim/station.gd")
 
 ## Most-zoomed-in Camera2D.zoom value this world allows. Confirmed
@@ -51,6 +56,12 @@ const TAP_MOVEMENT_THRESHOLD := 6.0
 ## (larger than the post's own STATION_PROP_SIZE render footprint) so a
 ## dropped Staffer doesn't have to land pixel-perfect on the prop.
 const STATION_POST_HIT_SIZE := Vector2(60.0, 60.0)
+
+## Where a tapped lobby guest's Needs bubble is anchored, relative to that
+## guest's own origin (its footprint's bottom center) -- above both its own
+## frame and its mood face, which sits at GuestActor.MOOD_FACE_OFFSET, so
+## the bubble never overlaps either.
+const NEEDS_BUBBLE_OFFSET := Vector2(0.0, -BuildingLayout.CHARACTER_FRAME_SIZE - BuildingLayout.MOOD_FACE_SIZE - 8.0)
 
 ## Emitted whenever a Staffer is tapped (a press/release with no drag) so
 ## main_screen can open their existing Skill/Trait detail popup -- same
@@ -113,6 +124,38 @@ var _cached_rooms_signature := ""
 var _terrace_tap_rect: Rect2 = Rect2()
 var _diner_actors: Dictionary = {}
 var _cached_dining_signature := ""
+
+## Ticket 10: lobby guest actors ("<party_id>:<member_index>" -> GuestActor),
+## rebuilt whenever Sim.pending_arrivals changes -- see _process()'s
+## signature check below, same pattern as _cached_dining_signature. Since
+## Patience decays every tick, this signature (unlike the structural ones
+## above) changes every tick too, so a lobby guest's mood face is kept
+## current by the same full rebuild that would otherwise only be needed for
+## arrivals/departures -- mirroring _rebuild_diners()'s identical tradeoff.
+var _lobby_guest_actors: Dictionary = {}
+var _cached_lobby_signature := ""
+
+## Non-null while a Needs bubble is open (ticket 10) -- popped by tapping a
+## lobby guest, closed by tapping that same guest again, tapping elsewhere,
+## or the guest disappearing from a rebuild (seated, walked away, or the
+## bubble's own Party simply no longer present). Parented to this node
+## directly (like _drag_preview below) rather than to _building, so a
+## structural rebuild (_rebuild_building(), which frees every _building
+## child) can never leave this dangling.
+var _needs_bubble: NeedsBubble = null
+var _needs_bubble_key := ""
+
+## Non-empty while a press has landed on a lobby GuestActor, awaiting
+## release to decide tap vs. abandoned press -- same TAP_MOVEMENT_THRESHOLD
+## -gated shape as _press_bay_actor/_press_terrace below. A String key, not
+## a GuestActor reference: unlike a Staffer or a Room bay, a lobby guest's
+## actor can be freed and recreated mid-press by _rebuild_lobby_guests()
+## (Patience decaying every tick churns this dictionary far more often than
+## Stations or hotel_rooms change), so releasing resolves the key against
+## _lobby_guest_actors fresh rather than holding a node that might already
+## be freed.
+var _press_guest_key := ""
+var _press_guest_start_world := Vector2.ZERO
 
 ## Non-empty while a Staffer is picked up (press landed on a StafferActor's
 ## hit_rect()) -- the id being dragged, its press-time world position (for
@@ -202,6 +245,16 @@ func _process(_delta: float) -> void:
 		_cached_dining_signature = dining_signature
 		_rebuild_diners(BuildingLayout.floors(GameState.rooms, GameState.stars))
 
+	## A Party arriving, being (fully) seated, or walking away all change
+	## pending_arrivals without changing the floor stack, same reasoning as
+	## the dining signature above -- and, also like it, Patience decaying
+	## every tick means this rebuilds every tick too, which is what keeps
+	## every lobby guest's mood face current.
+	var lobby_signature := _lobby_signature()
+	if lobby_signature != _cached_lobby_signature:
+		_cached_lobby_signature = lobby_signature
+		_rebuild_lobby_guests(BuildingLayout.floors(GameState.rooms, GameState.stars))
+
 
 ## --- Building composition ---
 
@@ -230,6 +283,8 @@ func _rebuild_building() -> void:
 	_terrace_tap_rect = BuildingLayout.resolve_terrace_signage_rect(floors)
 	_rebuild_diners(floors)
 	_cached_dining_signature = _dining_signature()
+	_rebuild_lobby_guests(floors)
+	_cached_lobby_signature = _lobby_signature()
 
 	_fit_all_zoom = _fit_zoom(BuildingLayout.fit_all_bounds(floors))
 
@@ -427,6 +482,7 @@ func _rebuild_diners(floors: Array) -> void:
 		actor.queue_free()
 	_diner_actors.clear()
 
+	var patience_cfg: Dictionary = GameState.balance.get("dining", {}).get("walkin_patience", {})
 	var placements := BuildingLayout.terrace_diner_placements(Sim.walkin_queue, Sim.dinner_jobs())
 	for entry in Sim.walkin_queue:
 		var entry_id: int = int(entry["id"])
@@ -435,11 +491,102 @@ func _rebuild_diners(floors: Array) -> void:
 		_building.add_child(actor)
 		actor.configure(String(entry["species_id"]))
 		actor.position = point
+		actor.update_mood(float(entry["patience"]), patience_cfg)
 		_diner_actors[entry_id] = actor
 
 
 func _dining_signature() -> String:
 	return str(Sim.walkin_queue) + "|" + str(Sim.dinner_jobs())
+
+
+## --- Lobby guests: mood faces and Needs bubbles (ticket 10) ---
+##
+## An arriving Party stands in the lobby as one GuestActor per member
+## (sim/building_layout.gd's lobby_guest_placements()), each carrying an
+## always-visible mood face that sours as its own Party's Patience decays
+## (BuildingLayout.resolve_mood_face_for_patience(), GameState.balance's
+## "patience" block -- the same config Sim._decay_patience() decays
+## pending_arrivals against). Tapping one pops a Needs bubble of Tag icons
+## for its Party (_toggle_needs_bubble()); Rooms glowing green/amber for the
+## selected Party and dragging a guest to seat them are ticket 11's job.
+
+func _lobby_signature() -> String:
+	return str(Sim.pending_arrivals)
+
+
+func _rebuild_lobby_guests(floors: Array) -> void:
+	for actor in _lobby_guest_actors.values():
+		actor.queue_free()
+	_lobby_guest_actors.clear()
+
+	var patience_cfg: Dictionary = GameState.balance["patience"]
+	for placement in BuildingLayout.lobby_guest_placements(Sim.pending_arrivals):
+		var party_id: int = int(placement["party_id"])
+		var member_index: int = int(placement["member_index"])
+		var party := Sim.pending_party(party_id)
+		var point: Vector2 = BuildingLayout.resolve_lobby_guest_point(floors, int(placement["queue_index"]))
+
+		var actor := GuestActor.new()
+		_building.add_child(actor)
+		actor.configure(party_id, member_index, String(party["species_id"]))
+		actor.position = point
+		actor.update_mood(float(party["patience"]), patience_cfg)
+		_lobby_guest_actors[_guest_key(party_id, member_index)] = actor
+
+	## A rebuild can drop the guest a currently-open Needs bubble belongs to
+	## (its Party got seated or walked away) or shift it to a new queue
+	## position (an earlier Party leaving pulls everyone behind it forward)
+	## -- close the bubble in the first case, follow the guest in the
+	## second, rather than leaving it anchored to a stale position or a
+	## freed actor.
+	if _needs_bubble != null:
+		if _lobby_guest_actors.has(_needs_bubble_key):
+			_needs_bubble.position = _lobby_guest_actors[_needs_bubble_key].position + NEEDS_BUBBLE_OFFSET
+		else:
+			_close_needs_bubble()
+
+
+func _guest_key(party_id: int, member_index: int) -> String:
+	return "%d:%d" % [party_id, member_index]
+
+
+func _guest_key_at(world_pos: Vector2) -> String:
+	for key in _lobby_guest_actors.keys():
+		var actor: GuestActor = _lobby_guest_actors[key]
+		if actor.hit_rect().has_point(world_pos):
+			return key
+	return ""
+
+
+## Opens a Needs bubble for the guest at `key`, or closes it if that guest's
+## bubble is already the one showing -- a second tap on the same guest
+## toggles it shut. A no-op if `key` no longer names a live guest (its
+## Party resolved between press and release).
+func _toggle_needs_bubble(key: String) -> void:
+	if _needs_bubble != null and _needs_bubble_key == key:
+		_close_needs_bubble()
+		return
+
+	if not _lobby_guest_actors.has(key):
+		return
+	var actor: GuestActor = _lobby_guest_actors[key]
+	var party := Sim.pending_party(actor.party_id)
+	if party.is_empty():
+		return
+
+	if _needs_bubble == null:
+		_needs_bubble = NeedsBubble.new()
+		add_child(_needs_bubble)
+	_needs_bubble.configure((party["needs"] as Array).duplicate())
+	_needs_bubble.position = actor.position + NEEDS_BUBBLE_OFFSET
+	_needs_bubble_key = key
+
+
+func _close_needs_bubble() -> void:
+	if _needs_bubble != null:
+		_needs_bubble.queue_free()
+		_needs_bubble = null
+	_needs_bubble_key = ""
 
 
 ## --- Staffer tap/drag (ticket 07) ---
@@ -620,9 +767,24 @@ func _unhandled_input(event: InputEvent) -> void:
 ## landed on a Staffer, that starts a Staffer drag/tap instead of a camera
 ## pan (see the header comment above _staffer_at()).
 func _on_press(world_pos: Vector2) -> void:
+	## "Tapping elsewhere" closes whatever Needs bubble is open (ticket 10):
+	## computed once up front so every other branch below -- a Staffer, a
+	## Room bay, the Terrace signage, or empty space starting a camera pan --
+	## counts as elsewhere. A press that lands back on the bubble's own guest
+	## leaves it alone here; _toggle_needs_bubble() (called from _on_release())
+	## decides whether that re-tap closes or just re-confirms it.
+	var guest_key := _guest_key_at(world_pos)
+	if guest_key == "" and _needs_bubble != null:
+		_close_needs_bubble()
+
 	var staffer_id := _staffer_at(world_pos)
 	if staffer_id != "":
 		_begin_staffer_drag(staffer_id, world_pos)
+		return
+
+	if guest_key != "":
+		_press_guest_key = guest_key
+		_press_guest_start_world = world_pos
 		return
 
 	var bay := _tappable_room_bay_at(world_pos)
@@ -642,6 +804,10 @@ func _on_press(world_pos: Vector2) -> void:
 func _on_release(world_pos: Vector2) -> void:
 	if _drag_staffer_id != "":
 		_end_staffer_drag(world_pos)
+	elif _press_guest_key != "":
+		if world_pos.distance_to(_press_guest_start_world) < TAP_MOVEMENT_THRESHOLD:
+			_toggle_needs_bubble(_press_guest_key)
+		_press_guest_key = ""
 	elif _press_bay_actor != null:
 		if world_pos.distance_to(_press_bay_start_world) < TAP_MOVEMENT_THRESHOLD:
 			room_slot_tapped.emit(_press_bay_actor.room_type_id, _press_bay_actor.instance_id)

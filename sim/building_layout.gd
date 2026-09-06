@@ -133,6 +133,8 @@ static func fit_all_bounds(floors_bottom_to_top: Array) -> Rect2:
 
 ## --- Room interior assignment (ticket 05) ---
 
+const PatienceState = preload("res://sim/patience_state.gd")
+
 const SHELL_DIR := "res://assets/hotel_shell/"
 
 ## Ticket 03 cut and named three real painted interiors *thematically*
@@ -707,6 +709,20 @@ static func resolve_mood_face(tier: String, probe_fn: Callable = Callable()) -> 
 	return _resolve_static_icon(MOOD_FACE_DIR, tier, Vector2(MOOD_FACE_SIZE, MOOD_FACE_SIZE), probe_fn)
 
 
+## Patience VALUE -> mood-face resolution (ticket 10): the one seam that
+## takes a waiting guest's raw Patience (a pending_arrivals Party's or a
+## Terrace walkin_queue entry's own "patience" field) straight to a
+## drawable mood face, so every mood-face-carrying actor sours continuously
+## as that value decays rather than each caller re-deriving
+## PatienceState.tier() itself. `patience_cfg` is whichever config block
+## owns that Patience -- data/balance.json's "patience" for a lobby Party,
+## "dining.walkin_patience" for a Terrace diner (PatienceState.tier()'s own
+## contract) -- so the same resolver serves both queues correctly even
+## though they decay against different start/threshold values.
+static func resolve_mood_face_for_patience(patience: float, patience_cfg: Dictionary, probe_fn: Callable = Callable()) -> Dictionary:
+	return resolve_mood_face(PatienceState.tier(patience, patience_cfg), probe_fn)
+
+
 static func resolve_station_prop(station_id: String, probe_fn: Callable = Callable()) -> Dictionary:
 	return _resolve_static_icon(STATION_PROP_DIR, station_id, Vector2(STATION_PROP_SIZE, STATION_PROP_SIZE), probe_fn)
 
@@ -784,3 +800,39 @@ static func resolve_terrace_diner_point(floors_bottom_to_top: Array, placement: 
 	if bucket == "pass":
 		return resolve_terrace_diner_spot(floors_bottom_to_top, TERRACE_LEVEL, index)
 	return resolve_terrace_entrance_queue_point(floors_bottom_to_top, TERRACE_LEVEL, index)
+
+
+## --- Lobby guests: mood faces and Needs bubbles (ticket 10) ---
+##
+## An arriving Party stands in the lobby as one character PER MEMBER -- a
+## Party of three is three consecutive lobby_queue slots, not one actor
+## carrying a "×3" caption -- so party size is seen rather than read
+## (spec.md stories 13/14). There is no "pass"/"queue" bucket split here
+## the way terrace_diner_placements() has one: every pending_arrivals Party
+## is, by definition, still waiting to be seated, so this returns a flat
+## ordered Array of member placements rather than a bucket Dictionary.
+
+## Expands `pending_arrivals` (Sim.pending_arrivals' own order) into one
+## entry per Party member: {party_id: int, member_index: int, queue_index:
+## int}. A later Party's members always continue the queue after an
+## earlier Party's, so a Party leaving (seated or walked away) simply
+## shortens the queue rather than reshuffling anyone still in it.
+static func lobby_guest_placements(pending_arrivals: Array) -> Array:
+	var out: Array = []
+	var queue_index := 0
+	for party in pending_arrivals:
+		var party_id: int = int(party["id"])
+		var party_size: int = int(party["party_size"])
+		for member_index in range(party_size):
+			out.append({"party_id": party_id, "member_index": member_index, "queue_index": queue_index})
+			queue_index += 1
+	return out
+
+
+## World position for a lobby guest's placement (as returned by
+## lobby_guest_placements() above) -- the lobby_queue anchor at that
+## member's own queue_index. Reception is always floors_bottom_to_top's
+## first entry (GROUND_FLOOR_LEVEL == its own index), same fixed-index
+## reasoning resolve_station_post_anchor() already relies on.
+static func resolve_lobby_guest_point(floors_bottom_to_top: Array, queue_index: int) -> Vector2:
+	return resolve_lobby_queue_point(floors_bottom_to_top, GROUND_FLOOR_LEVEL, queue_index)

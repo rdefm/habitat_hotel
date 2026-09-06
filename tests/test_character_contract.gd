@@ -157,6 +157,51 @@ func test_mood_face_uses_patience_states_tier_vocabulary() -> void:
 		assert_eq(face["size"], Vector2(BuildingLayout.MOOD_FACE_SIZE, BuildingLayout.MOOD_FACE_SIZE))
 
 
+## --- resolve_mood_face_for_patience(): Patience value -> mood face (ticket 10) ---
+
+const PATIENCE_CFG := {"start": 80, "decay_per_tick": 1, "impatient_at": 40, "huffy_at": 15}
+
+
+func test_a_calm_patience_value_resolves_to_the_calm_mood_face() -> void:
+	var face := BuildingLayout.resolve_mood_face_for_patience(80.0, PATIENCE_CFG, func(_p): return false)
+
+	assert_eq(face, BuildingLayout.resolve_mood_face("calm", func(_p): return false))
+
+
+func test_an_impatient_patience_value_resolves_to_the_impatient_mood_face() -> void:
+	var face := BuildingLayout.resolve_mood_face_for_patience(40.0, PATIENCE_CFG, func(_p): return false)
+
+	assert_eq(face, BuildingLayout.resolve_mood_face("impatient", func(_p): return false))
+
+
+func test_a_huffy_patience_value_resolves_to_the_huffy_mood_face() -> void:
+	var face := BuildingLayout.resolve_mood_face_for_patience(0.0, PATIENCE_CFG, func(_p): return false)
+
+	assert_eq(face, BuildingLayout.resolve_mood_face("huffy", func(_p): return false))
+
+
+func test_mood_face_for_patience_sours_continuously_as_patience_decays() -> void:
+	## Same value, decaying tick by tick, crosses all three tiers -- the
+	## point of a continuous mood face rather than a threshold alert.
+	var calm := BuildingLayout.resolve_mood_face_for_patience(41.0, PATIENCE_CFG, func(_p): return false)
+	var impatient := BuildingLayout.resolve_mood_face_for_patience(16.0, PATIENCE_CFG, func(_p): return false)
+	var huffy := BuildingLayout.resolve_mood_face_for_patience(15.0, PATIENCE_CFG, func(_p): return false)
+
+	assert_eq(calm, BuildingLayout.resolve_mood_face("calm", func(_p): return false))
+	assert_eq(impatient, BuildingLayout.resolve_mood_face("impatient", func(_p): return false))
+	assert_eq(huffy, BuildingLayout.resolve_mood_face("huffy", func(_p): return false))
+
+
+func test_mood_face_for_patience_uses_the_dining_walkin_patience_thresholds_when_given_that_config() -> void:
+	## Same resolver, the Terrace's own (different) start/threshold values --
+	## proves it's the caller's patience_cfg, not a hardcoded Reception one.
+	var dining_cfg := {"start": 48, "decay_per_tick": 1, "impatient_at": 24, "huffy_at": 9, "unstaffed_multiplier": 1.6}
+
+	var face := BuildingLayout.resolve_mood_face_for_patience(9.0, dining_cfg, func(_p): return false)
+
+	assert_eq(face, BuildingLayout.resolve_mood_face("huffy", func(_p): return false))
+
+
 func test_station_prop_falls_back_for_every_real_station_id() -> void:
 	for station_id in ["reception", "housekeeping", "kitchen"]:
 		var prop := BuildingLayout.resolve_station_prop(station_id, func(_p): return false)
