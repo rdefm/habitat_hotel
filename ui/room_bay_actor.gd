@@ -22,6 +22,14 @@ const BUILD_SLOT_TINT := Color(0.3, 0.65, 0.35, 0.4)
 const EMPTY_SHELL_TINT := Color(0.05, 0.05, 0.05, 0.5)
 const BUILT_TINT := Color(0, 0, 0, 0)
 
+## Ticket 13: the mess overlay's alpha floor at full Job progress (visual_state's
+## "mess_progress" == 0.0) -- never fully invisible mid-Job, since the Room is
+## still dirty until needs_cleaning actually flips false and the overlay stops
+## being added at all (ui/hotel_world.gd's own _rebuild_room_bays()). Alpha
+## between this floor and 1.0 (freshly dirtied, no Staffer working it yet) is
+## a straight lerp against the Job's own ticks_remaining fraction.
+const MESS_OVERLAY_MIN_ALPHA := 0.2
+
 ## Ticket 11's Match hint glow, drawn as a translucent overlay above a built
 ## bay's own content (so a door plate/upgrade prop under it stays legible)
 ## rather than replacing _background's tint -- a bay's occupancy/dirt/
@@ -71,7 +79,7 @@ func configure(new_room_type_id: String, bay_state: Dictionary, bay_size: Vector
 			_background.color = BUILT_TINT
 			_add_door_plate(room_number)
 			if bool(visual_state.get("dirty", false)):
-				_add_mess_overlay()
+				_add_mess_overlay(float(visual_state.get("mess_progress", 1.0)))
 			_add_upgrade_props(visual_state.get("upgrade_ids", []))
 
 
@@ -116,12 +124,17 @@ func _add_door_plate(room_number: int) -> void:
 
 ## Centered over the bay -- a dirty Room's mess is meant to read at a
 ## glance from across the building (spec.md story 30), not tucked in a
-## corner alongside the door plate or upgrade props.
-func _add_mess_overlay() -> void:
+## corner alongside the door plate or upgrade props. `progress` (ticket 13,
+## ui/hotel_world.gd's _room_mess_progress()) fades it toward
+## MESS_OVERLAY_MIN_ALPHA as the Room's Housekeeping Job counts down, so
+## cleaning progress is something the player watches rather than infers
+## (spec.md story 31) -- 1.0 (fully opaque) for a dirty-but-unclaimed Room.
+func _add_mess_overlay(progress: float) -> void:
 	var overlay := CharacterSprite.new()
 	add_child(overlay)
 	overlay.configure(BuildingLayout.resolve_mess_overlay())
 	overlay.position = _bay_size / 2.0 + Vector2(0, BuildingLayout.MESS_OVERLAY_SIZE / 2.0)
+	overlay.modulate.a = lerpf(MESS_OVERLAY_MIN_ALPHA, 1.0, progress)
 
 
 ## Right-aligned along the bay's bottom edge, one prop per purchased

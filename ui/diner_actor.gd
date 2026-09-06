@@ -16,13 +16,18 @@ extends Node2D
 ## Patience is simply frozen rather than absent (Sim._decay_walkin_patience()
 ## skips decaying it, but the field is still there).
 ##
-## No tap/drag behaviour: unlike a Staffer, a Room bay, or a lobby guest, a
-## diner isn't a tap target -- a Walk-in Diner has no "needs" array (the
-## Match puzzle is a Room-booking Party's concern, not the Terrace's), so
-## there's no Needs bubble for this class to pop. This class only draws.
+## No tap behaviour: unlike a Staffer, a Room bay, or a lobby guest, a diner
+## isn't a tap target -- a Walk-in Diner has no "needs" array (the Match
+## puzzle is a Room-booking Party's concern, not the Terrace's), so there's
+## no Needs bubble for this class to pop. hit_rect() below exists only as a
+## Staffer drag's Stacking drop target (ticket 13, ADR-0008) -- dropping a
+## second Staffer onto a diner already being served stacks them onto that
+## same dinner Job; this class itself only draws and reports its footprint.
 
 const CharacterSprite = preload("res://ui/character_sprite.gd")
 const BuildingLayout = preload("res://sim/building_layout.gd")
+
+const HIT_SIZE := Vector2(BuildingLayout.CHARACTER_FRAME_SIZE, BuildingLayout.CHARACTER_FRAME_SIZE)
 
 ## Mirrors ui/guest_actor.gd's MOOD_FACE_OFFSET exactly, so a diner's mood
 ## face sits at the identical relative position a lobby guest's does.
@@ -49,3 +54,10 @@ func configure(new_species_id: String) -> void:
 
 func update_mood(patience: float, patience_cfg: Dictionary) -> void:
 	_mood_face.configure(BuildingLayout.resolve_mood_face_for_patience(patience, patience_cfg))
+
+
+## World-space hit rect for a Staffer drag's Stacking drop, matching
+## ui/staffer_actor.gd's own footprint convention -- this node's origin is
+## the footprint's bottom center.
+func hit_rect() -> Rect2:
+	return Rect2(global_position - Vector2(HIT_SIZE.x / 2.0, HIT_SIZE.y), HIT_SIZE)

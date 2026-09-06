@@ -41,7 +41,18 @@ extends Node2D
 ## timing (spec.md: "the animation never gates the simulation") -- the wait
 ## is polled against Sim's own flag rather than re-timed to match it, and a
 ## Room whose journey is still in flight is skipped by the ordinary
-## occupant render pass so the two never show the guest twice.
+## occupant render pass so the two never show the guest twice. Ticket 13
+## reuses this same elevator-ride machinery (_play_ride_legs()) for a
+## Housekeeping Staffer's own travel to and from the Room they're cleaning --
+## see the "Staffer Job travel" section near the bottom of this file. A
+## Kitchen Staffer needs no travel of its own: Kitchen's Station post
+## (sim/building_layout.gd's STATION_POST_ANCHOR_NAME) already sits at the
+## Terrace pass, so _rebuild_staffers() only has to swap that Staffer's own
+## CharacterSprite to its "working" state while a breakfast/dinner Job keeps
+## them busy. Dragging a second Staffer onto an in-progress Job (either
+## Station) Stacks them via the existing Sim.can_stack_*()/stack_staffer_on_*()
+## calls, same gesture and validation ADR-0008 already specifies -- no rule
+## duplicated here.
 
 const BuildingLayout = preload("res://sim/building_layout.gd")
 const CharacterSprite = preload("res://ui/character_sprite.gd")
@@ -231,6 +242,18 @@ var _room_occupant_actors: Dictionary = {}
 ## out on the way down, unlike check-in's flat checkin.delay_ticks.
 var _active_room_journeys: Dictionary = {}
 
+## Ticket 13: every in-flight Housekeeping Staffer Job travel, keyed by
+## staffer_id (unlike _active_room_journeys above, which is keyed by
+## room_key -- more than one Staffer can be travelling to the SAME Room at
+## once, Stacked onto the same Job) -- {actor: CharacterSprite, tween:
+## Tween, room_type_id: String, instance_id: int}. A tracked staffer_id is
+## skipped entirely by _rebuild_staffers()'s ordinary post/nook render --
+## this dict owns their visible actor until the Job resolves or they're
+## reassigned elsewhere. A Kitchen Staffer never appears here: Kitchen's own
+## Station post already sits at the Terrace pass, so there's nothing to
+## travel to -- see _rebuild_staffers()'s own "working" state swap instead.
+var _staffer_travel: Dictionary = {}
+
 ## Non-null while a Needs bubble is open (ticket 10) -- popped by tapping a
 ## lobby guest, closed by tapping that same guest again, tapping elsewhere,
 ## or the guest disappearing from a rebuild (seated, walked away, or the
@@ -355,6 +378,7 @@ func _process(delta: float) -> void:
 		_auto_pan_if_near_edge(delta)
 
 	_poll_waiting_journeys()
+	_sync_staffer_travel()
 
 	var floor_count := BuildingLayout.unlocked_room_type_ids_ascending(GameState.rooms, GameState.stars).size()
 	if floor_count != _cached_floor_count:
@@ -419,6 +443,14 @@ func _rebuild_building() -> void:
 		if j.get("tween") != null and j["tween"].is_valid():
 			j["tween"].kill()
 	_active_room_journeys.clear()
+
+	## Ticket 13: same defensive teardown as the guest journeys just above --
+	## a Staffer Job travel actor is also a child of _building about to be
+	## freed wholesale below.
+	for j in _staffer_travel.values():
+		if j.get("tween") != null and j["tween"].is_valid():
+			j["tween"].kill()
+	_staffer_travel.clear()
 
 	for child in _building.get_children():
 		child.queue_free()
@@ -560,15 +592,20 @@ func _rebuild_station_posts(floors: Array) -> void:
 ## Every Staffer, standing at their Station's post if assigned or the staff
 ## nook if not (sim/building_layout.gd's staffer_placements(), ticket 07)
 ## -- replaces ticket 06's hardcoded _spawn_manny() with the same
-## resolve_character_sprite("staffer", id, "idle") path for every Staffer,
+## resolve_character_sprite("staffer", id, ...) path for every Staffer,
 ## Manny included: he has no idle sheet, so he now renders his placeholder
 ## like anyone else's rest state would, rather than being special-cased
-## into his walk-cycle demo -- nothing yet drives a "working" state (that's
-## tickets 08/13's Job travel). Called on structural rebuilds and whenever
-## GameState.stations changes (see _process()), never mid-drag: the
-## Staffer actually being dragged is only ever moved by our own
-## Sim.assign_staffer() call at drop, which happens after the drag has
-## already ended.
+## into his walk-cycle demo. Ticket 13: a Staffer currently tracked in
+## _staffer_travel (a Housekeeping Staffer mid-Job, travelling to or
+## working at their actual Room) is skipped here entirely -- that dict
+## owns their visible actor instead, so this pass would otherwise draw them
+## twice. A Kitchen Staffer never travels (their Station post already sits
+## at the Terrace pass), so they still render here, just swapped to the
+## "working" state while a breakfast/dinner Job keeps them busy. Called on
+## structural rebuilds and whenever GameState.stations changes (see
+## _process()), never mid-drag: the Staffer actually being dragged is only
+## ever moved by our own Sim.assign_staffer()/Sim.stack_staffer_on_*() call
+## at drop, which happens after the drag has already ended.
 func _rebuild_staffers(floors: Array) -> void:
 	for actor in _staffer_actors.values():
 		actor.queue_free()
@@ -576,12 +613,23 @@ func _rebuild_staffers(floors: Array) -> void:
 
 	var placements := BuildingLayout.staffer_placements(GameState.stations, GameState.staffers.keys())
 	for staffer_id in placements.keys():
+		if _staffer_travel.has(staffer_id):
+			continue
 		var point: Vector2 = BuildingLayout.resolve_staffer_point(floors, placements[staffer_id])
 		var actor := StafferActor.new()
 		_building.add_child(actor)
-		actor.configure(staffer_id)
+		var state := "working" if _kitchen_job_active(staffer_id) else "idle"
+		actor.configure(staffer_id, state)
 		actor.position = point
 		_staffer_actors[staffer_id] = actor
+
+
+## True iff staffer_id is currently mid-breakfast XOR mid-dinner (ADR-0005:
+## _kitchen_busy() means never both at once) -- _rebuild_staffers()'s own
+## "working" state swap for a Kitchen Staffer, who (unlike a Housekeeping
+## Staffer) never leaves their Station post to earn it.
+func _kitchen_job_active(staffer_id: String) -> bool:
+	return not Sim.breakfast_job(staffer_id).is_empty() or not Sim.dinner_job(staffer_id).is_empty()
 
 
 ## --- Room bays (ticket 08) ---
@@ -620,6 +668,8 @@ func _rebuild_room_bays(floors: Array) -> void:
 			if bay_state["state"] == "built":
 				var room := GameState.room_instance(room_type_id, int(bay_state["instance_id"]))
 				visual_state = BuildingLayout.room_bay_visual_state(room)
+				if visual_state["dirty"]:
+					visual_state["mess_progress"] = _room_mess_progress(room_type_id, int(bay_state["instance_id"]))
 				_rebuild_room_occupants(floors, i, room_type_id, int(bay_state["instance_id"]), room)
 
 			var actor := RoomBayActor.new()
@@ -678,7 +728,25 @@ func _rebuild_room_occupants(floors: Array, floor_index: int, room_type_id: Stri
 ## re-triggers _rebuild_room_bays() and therefore _rebuild_room_occupants()'s
 ## sleeping-state swap.
 func _rooms_signature() -> String:
-	return str(GameState.hotel_rooms) + "|" + str(int(Clock.current_phase))
+	return str(GameState.hotel_rooms) + "|" + str(int(Clock.current_phase)) + "|" + _cleaning_progress_signature()
+
+
+## Ticket 13: folds every in-flight Housekeeping Job's own ticks_remaining
+## into the rooms signature above, so a Job progressing (no hotel_rooms
+## mutation of its own -- needs_cleaning only flips at the very end) still
+## re-triggers _rebuild_room_bays() every tick, the same "full rebuild every
+## tick while something is continuously changing" trade-off
+## _lobby_signature()/_dining_signature() already make for Patience decay.
+## Empty (and therefore a no-op on the signature) whenever no Room is
+## dirty, unlike those two, which always change every tick regardless.
+func _cleaning_progress_signature() -> String:
+	var parts: Array = []
+	for room in GameState.hotel_rooms:
+		if not bool(room.get("needs_cleaning", false)):
+			continue
+		for staffer_id in Sim.cleaning_staffers(String(room["room_type_id"]), int(room["instance_id"])):
+			parts.append(str(Sim.cleaning_job(staffer_id).get("ticks_remaining", -1)))
+	return "|".join(parts)
 
 
 ## Shared by every Room-addressing dict in this file (_room_occupant_actors,
@@ -1072,6 +1140,195 @@ func _detach_elevator_car(actor: CharacterSprite) -> void:
 		car.queue_free()
 
 
+## --- Staffer Job travel: Housekeeping travel and Stacking (ticket 13) ---
+##
+## A Housekeeping Staffer's travel mirrors the guest elevator journey above
+## (_play_ride_legs() is shared verbatim) but is polled every frame against
+## Sim.cleaning_job() rather than event-driven, since Housekeeping/Kitchen
+## Jobs (unlike check-in/checkout) fire no per-Job start/end signal of their
+## own -- sim_controller.gd's own _tick_housekeeping()/_drop_staffer_jobs()
+## silently create and erase _cleaning_jobs entries each tick. A tracked
+## staffer_id whose Job entry has disappeared this tick is "resolved" (the
+## ticket's "works there until it completes, then returns" -- plays a
+## return trip) if their target Room actually cleared (needs_cleaning
+## flipped false), or "interrupted" (the ticket's "reassigning ... interrupts
+## their travel immediately" -- freed on the spot, no return trip) otherwise,
+## since a reassignment (Sim.assign_staffer()) or a Stack-elsewhere
+## (Sim.stack_staffer_on_room() onto a DIFFERENT Room) both drop a Job entry
+## without ever clearing its old target's needs_cleaning flag. Stacking a
+## second Staffer onto an already-claimed Job (ADR-0008) needs no special
+## case: it's just another staffer_id independently discovered by the same
+## per-frame sweep, travelling to the very same room_type_id/instance_id.
+##
+## Kitchen has no equivalent travel: see _kitchen_job_active()'s own doc
+## comment on _rebuild_staffers() above.
+
+func _sync_staffer_travel() -> void:
+	var active: Dictionary = {}
+	for staffer_id in GameState.station_staffers("housekeeping"):
+		var job := Sim.cleaning_job(staffer_id)
+		if job.is_empty():
+			continue
+		active[staffer_id] = true
+		var room_type_id: String = String(job["room_type_id"])
+		var instance_id: int = int(job["instance_id"])
+		var entry: Dictionary = _staffer_travel.get(staffer_id, {})
+		if entry.is_empty() or entry["room_type_id"] != room_type_id or entry["instance_id"] != instance_id:
+			_start_staffer_travel(staffer_id, room_type_id, instance_id)
+
+	for staffer_id in _staffer_travel.keys().duplicate():
+		if active.has(staffer_id):
+			continue
+		var entry: Dictionary = _staffer_travel[staffer_id]
+		var room := GameState.room_instance(entry["room_type_id"], entry["instance_id"])
+		var resolved: bool = room.is_empty() or not bool(room.get("needs_cleaning", false))
+		_end_staffer_travel(staffer_id, resolved)
+
+
+## Starts staffer_id's outbound leg from the Housekeeping post to the actual
+## Room they just claimed, via the same walk/ride/walk shape as a guest
+## check-in -- always departing from the post's own fixed anchor rather than
+## wherever the Staffer happened to be standing, mirroring the retired
+## ui/staff_job_travel_layer.gd's own _home_anchor() convention. Frees any
+## stale entry first (_cancel_staffer_travel()) so a mid-Job retarget --
+## Sim.stack_staffer_on_room() dragging this same Staffer onto a DIFFERENT
+## Room while their old Job is still in flight -- cuts immediately to the
+## new target with no return trip, rather than being mistaken for the
+## ordinary "already there" case.
+func _start_staffer_travel(staffer_id: String, room_type_id: String, instance_id: int) -> void:
+	_cancel_staffer_travel(staffer_id)
+
+	var floors := BuildingLayout.floors(GameState.rooms, GameState.stars)
+	var room_floor_index := BuildingLayout.floor_index_for_room_type(floors, room_type_id)
+	if room_floor_index == -1: # defensive only -- every caller sources room_type_id from a live Sim.cleaning_job()
+		return
+
+	var actor := CharacterSprite.new()
+	_building.add_child(actor)
+	actor.configure(BuildingLayout.resolve_character_sprite("staffer", staffer_id, "walk"))
+	actor.position = BuildingLayout.resolve_station_post_anchor(floors, "housekeeping")
+
+	## Snapshotted once, at claim time, for _room_mess_progress()'s fade --
+	## see that function's own doc comment for why Stacking's later recompute
+	## can never push ticks_remaining above this baseline.
+	var total_ticks := int(Sim.cleaning_job(staffer_id).get("ticks_remaining", 0))
+	var j := {"actor": actor, "tween": null, "room_type_id": room_type_id, "instance_id": instance_id, "total_ticks": total_ticks}
+	_staffer_travel[staffer_id] = j
+
+	var post_door: Vector2 = BuildingLayout.resolve_anchor(floors, 0, "elevator_door")
+	var room_door: Vector2 = BuildingLayout.resolve_anchor(floors, room_floor_index, "elevator_door")
+	var destination: Vector2 = BuildingLayout.resolve_room_housekeeper_point(floors, room_floor_index, instance_id)
+
+	_play_ride_legs(j, post_door, room_door, destination, room_floor_index, _arrive_staffer_travel.bind(staffer_id))
+
+
+## Arrival: swaps the travelling actor to its "working" state and leaves it
+## parked at the Room -- _play_ride_legs()'s own last leg already placed it
+## there, so there's nothing left to move.
+func _arrive_staffer_travel(staffer_id: String) -> void:
+	var j: Dictionary = _staffer_travel.get(staffer_id, {})
+	if j.is_empty():
+		return
+	var actor: CharacterSprite = j["actor"]
+	actor.configure(BuildingLayout.resolve_character_sprite("staffer", staffer_id, "working"))
+
+
+## Ends staffer_id's tracked travel. A resolved Job (the ticket's "then
+## returns") plays a return trip from wherever the actor currently stands
+## back to the Housekeeping post before freeing it and forcing
+## _rebuild_staffers() -- reassignment plays no part in a natural
+## completion, so GameState.stations (and therefore the ordinary
+## stations_signature-driven rebuild in _process()) never changes on its
+## own here, unlike the interrupted branch below. An interrupted one (the
+## ticket's "interrupts their travel immediately") frees it on the spot with
+## no return trip: GameState.stations DID just change (a reassignment or a
+## Stack-elsewhere caused this), so _process()'s own stations_signature
+## check -- which always runs later in the same frame, since
+## _sync_staffer_travel() is called before it -- renders the Staffer at
+## their new post or the nook the moment this function returns.
+func _end_staffer_travel(staffer_id: String, resolved: bool) -> void:
+	var j: Dictionary = _staffer_travel.get(staffer_id, {})
+	if j.is_empty():
+		return
+	_staffer_travel.erase(staffer_id)
+
+	var outbound_tween: Tween = j.get("tween")
+	if outbound_tween != null and outbound_tween.is_valid():
+		outbound_tween.kill() # in case the Job resolved before the outbound leg ever finished
+
+	var actor: CharacterSprite = j["actor"]
+	if not resolved:
+		actor.queue_free()
+		return
+
+	var floors := BuildingLayout.floors(GameState.rooms, GameState.stars)
+	var room_floor_index := BuildingLayout.floor_index_for_room_type(floors, j["room_type_id"])
+	if room_floor_index == -1: # defensive only, mirrors _start_staffer_travel()'s own guard
+		actor.queue_free()
+		_rebuild_staffers(floors)
+		return
+
+	actor.configure(BuildingLayout.resolve_character_sprite("staffer", staffer_id, "walk"))
+	var room_door: Vector2 = BuildingLayout.resolve_anchor(floors, room_floor_index, "elevator_door")
+	var post_door: Vector2 = BuildingLayout.resolve_anchor(floors, 0, "elevator_door")
+	var post: Vector2 = BuildingLayout.resolve_station_post_anchor(floors, "housekeeping")
+
+	var ret := {"actor": actor, "tween": null}
+	_play_ride_legs(ret, room_door, post_door, post, room_floor_index, _finish_staffer_return.bind(actor))
+
+
+## The return trip's own finish callback: frees the now-arrived actor and
+## forces _rebuild_staffers() so the ordinary post render picks the Staffer
+## back up immediately, rather than waiting for a stations_signature change
+## that (per _end_staffer_travel()'s own doc) never comes on a natural
+## completion.
+func _finish_staffer_return(actor: CharacterSprite) -> void:
+	actor.queue_free()
+	_rebuild_staffers(BuildingLayout.floors(GameState.rooms, GameState.stars))
+
+
+## Kills staffer_id's in-flight travel (if any) and frees its actor
+## immediately, with no completion side effects -- used defensively where a
+## fresh travel is about to claim a Staffer a stale one might still hold
+## (a mid-Job retarget via Stacking, per _start_staffer_travel()'s own doc).
+func _cancel_staffer_travel(staffer_id: String) -> void:
+	var stale: Dictionary = _staffer_travel.get(staffer_id, {})
+	if stale.is_empty():
+		return
+	var tween: Tween = stale.get("tween")
+	if tween != null and tween.is_valid():
+		tween.kill()
+	if stale.get("actor") != null:
+		stale["actor"].queue_free()
+	_staffer_travel.erase(staffer_id)
+
+
+## How far a Room's Housekeeping Job has visibly progressed (spec.md story
+## 31, the ticket's "mess visibly disappears as the Job progresses") -- 1.0
+## (full mess) whenever no tracked Staffer is targeting the Room, otherwise
+## interpolated against the SAME Sim.cleaning_job() ticks_remaining
+## countdown _sync_staffer_travel() already polls, purely as a presentation
+## fade: the HK_TICKS_BY_SKILL lookup itself is never re-derived here, only
+## observed. The baseline is _staffer_travel[staffer_id]["total_ticks"],
+## snapshotted once at claim time -- Stacking's own recompute
+## (Sim.stack_staffer_on_room(), ADR-0008) sums Skill, which the balance
+## table maps to a ticks_remaining that's always <= a lower/solo Skill's own
+## total, so this can never run backwards past 1.0 or negative past 0.0 (the
+## clampf() below is belt-and-suspenders only). More than one Staffer can be
+## Stacked on the same Job; either one's own tracked entry gives the same
+## live ticks_remaining (stack_staffer_on_room() sets both identically), so
+## the first one found is enough.
+func _room_mess_progress(room_type_id: String, instance_id: int) -> float:
+	for staffer_id in Sim.cleaning_staffers(room_type_id, instance_id):
+		var entry: Dictionary = _staffer_travel.get(staffer_id, {})
+		var total: int = int(entry.get("total_ticks", 0))
+		if total <= 0:
+			continue
+		var remaining: int = int(Sim.cleaning_job(staffer_id).get("ticks_remaining", total))
+		return clampf(float(remaining) / float(total), 0.0, 1.0)
+	return 1.0
+
+
 ## --- Staffer tap/drag (ticket 07) ---
 ##
 ## Hand-rolled against world-space hit rects rather than Godot's Control-
@@ -1110,6 +1367,20 @@ func _station_post_at(world_pos: Vector2) -> String:
 	return ""
 
 
+## Ticket 13: the Sim.walkin_queue entry id under world_pos, for a Staffer
+## drag's dinner-Stacking drop -- only a diner actually being served (has a
+## live dinner Job) is ever a meaningful Stacking target, but that's
+## Sim.can_stack_staffer_on_dinner()'s call to make, not this hit-test's; a
+## diner still queued (no Job yet) is returned the same as one being served
+## and simply rejected by that check, no rule duplicated here.
+func _served_diner_at(world_pos: Vector2) -> int:
+	for entry_id in _diner_actors.keys():
+		var actor: DinerActor = _diner_actors[entry_id]
+		if actor.hit_rect().has_point(world_pos):
+			return int(entry_id)
+	return -1
+
+
 func _begin_staffer_drag(staffer_id: String, world_pos: Vector2) -> void:
 	_drag_staffer_id = staffer_id
 	_drag_start_world = world_pos
@@ -1127,12 +1398,19 @@ func _update_drag_preview(world_pos: Vector2) -> void:
 		_drag_preview.position = world_pos
 
 
-## Ends the in-progress Staffer drag/tap: assigns via the existing
-## Sim.assign_staffer() path (the same reassignment/interruption semantics
-## ui/station_card.gd's drop handling already used) if the release moved
-## past the drag threshold and landed on a post, emits staffer_tapped if it
-## didn't move (a tap), and otherwise leaves the Staffer where they were --
-## no explicit "unassign" gesture exists, matching the old Control view.
+## Ends the in-progress Staffer drag/tap. A release that moved past the drag
+## threshold tries, in order: a Station post drop (the existing
+## Sim.assign_staffer() path -- the same reassignment/interruption semantics
+## ui/station_card.gd's drop handling already used); a built Room bay drop
+## (ticket 13, ADR-0008 -- Sim.can_stack_staffer_on_room()/
+## stack_staffer_on_room(), Stacking this Staffer onto that Room's
+## in-progress Housekeeping Job, no rule re-derived here); a served Terrace
+## diner drop (same ticket -- Sim.can_stack_staffer_on_dinner()/
+## stack_staffer_on_dinner() for that diner's in-progress dinner Job). None
+## of the three landing is simply an abandoned drag, same as every other
+## drag in this file that misses its target. An unmoved press emits
+## staffer_tapped (a tap); no explicit "unassign" gesture exists, matching
+## the old Control view.
 func _end_staffer_drag(world_pos: Vector2) -> void:
 	var staffer_id := _drag_staffer_id
 	var moved := world_pos.distance_to(_drag_start_world) >= TAP_MOVEMENT_THRESHOLD
@@ -1142,12 +1420,24 @@ func _end_staffer_drag(world_pos: Vector2) -> void:
 		_drag_preview.queue_free()
 		_drag_preview = null
 
-	if moved:
-		var station_id := _station_post_at(world_pos)
-		if station_id != "":
-			Sim.assign_staffer(staffer_id, station_id)
-	else:
+	if not moved:
 		staffer_tapped.emit(staffer_id)
+		return
+
+	var station_id := _station_post_at(world_pos)
+	if station_id != "":
+		Sim.assign_staffer(staffer_id, station_id)
+		return
+
+	var bay := _tappable_room_bay_at(world_pos)
+	if bay != null and bay.state == "built":
+		if Sim.can_stack_staffer_on_room(staffer_id, bay.room_type_id, bay.instance_id):
+			Sim.stack_staffer_on_room(staffer_id, bay.room_type_id, bay.instance_id)
+		return
+
+	var entry_id := _served_diner_at(world_pos)
+	if entry_id != -1 and Sim.can_stack_staffer_on_dinner(staffer_id, entry_id):
+		Sim.stack_staffer_on_dinner(staffer_id, entry_id)
 
 
 ## --- Guest tap/drag and seating (ticket 11, ADR-0001/0009) ---

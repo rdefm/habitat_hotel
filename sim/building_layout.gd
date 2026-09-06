@@ -901,6 +901,25 @@ static func resolve_room_occupant_point(floors_bottom_to_top: Array, i: int, bay
 	return _resolve_local_point(floors_bottom_to_top, i, bay_local + room_occupant_point_local(member_index))
 
 
+## Where a Housekeeping Staffer stands while working a Room's cleaning Job
+## (ticket 13) -- centered along the bay's bottom edge, clear of the occupant
+## grid's own two columns (ROOM_OCCUPANT_GRID_ORIGIN's local x=30/120) at
+## every painted floor height in the catalog, including ice_grotto's shorter
+## 131px band, so a Staffer working an occupied Room (e.g. mid-checkout)
+## never stands on top of a settled guest.
+static func room_housekeeper_point_local(height: float) -> Vector2:
+	return Vector2(BAY_WIDTH / 2.0, height - 20.0)
+
+
+## World position for the Housekeeping Staffer working the built Room at
+## bay_index on floor index i -- same bay-rect-plus-local-point shape as
+## resolve_room_occupant_point() above.
+static func resolve_room_housekeeper_point(floors_bottom_to_top: Array, i: int, bay_index: int) -> Vector2:
+	var height: float = float(floors_bottom_to_top[i]["height"])
+	var bay_local: Vector2 = room_bay_rect_local(bay_index, height).position
+	return _resolve_local_point(floors_bottom_to_top, i, bay_local + room_housekeeper_point_local(height))
+
+
 ## The floor index (within floors_bottom_to_top) of the Room floor for
 ## room_type_id -- the elevator journey (ui/hotel_world.gd, ticket 12) needs
 ## this to find a check-in/checkout's destination/origin elevator_door
