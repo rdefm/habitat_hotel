@@ -35,11 +35,11 @@ const ToastLayer = preload("res://ui/toast_layer.gd")
 ## false keeps the pre-ADR-0020 view running unchanged. Both stay wired to
 ## the same GameState/Sim autoloads and both are playable -- flip this
 ## during development until ticket 17 deletes the old view (and this flag)
-## for good. The old view's Reception/Terrace interactivity has no
-## equivalent in the world yet (ticket 09 builds it); ticket 07 gave the
-## world Station posts/Staffer tap-drag and ticket 08 gave it Room bays
-## (built/Build Slot/empty shell, tap-to-build and tap-to-inspect), so both
-## are tappable already.
+## for good. The old view's Reception structure tap has no equivalent in
+## the world yet; ticket 07 gave the world Station posts/Staffer tap-drag,
+## ticket 08 gave it Room bays (built/Build Slot/empty shell, tap-to-build
+## and tap-to-inspect), and ticket 09 gave it the Terrace's signage tap and
+## its diner placement, so all three are tappable already.
 const USE_HOTEL_WORLD := true
 
 var _cash_label: Label
@@ -76,6 +76,7 @@ func _ready() -> void:
 		add_child(_hotel_world)
 		_hotel_world.staffer_tapped.connect(_on_staffer_tapped)
 		_hotel_world.room_slot_tapped.connect(_on_hotel_slot_selected)
+		_hotel_world.terrace_tapped.connect(_on_terrace_tapped)
 	else:
 		_build_old_hotel_view()
 

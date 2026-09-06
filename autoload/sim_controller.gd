@@ -297,6 +297,17 @@ func dinner_job(staffer_id: String) -> Dictionary:
 	return _dinner_jobs.get(staffer_id, {})
 
 
+## Read-only snapshot of every in-flight dinner Job, keyed the same as
+## _dinner_jobs itself (staffer_id -> {entry_id, ticks_remaining}) -- for UI
+## (ui/hotel_world.gd's Terrace diner placement, ticket 09,
+## sim/building_layout.gd's terrace_diner_placements()) that needs to know
+## which walkin_queue entries are currently being served without reaching
+## into this controller's own private state. Deep-duplicated (true) so a
+## caller mutating a returned per-Job dict can't reach _dinner_jobs' own.
+func dinner_jobs() -> Dictionary:
+	return _dinner_jobs.duplicate(true)
+
+
 ## The Staffer id(s) (0, 1, or up to STACK_CAP) currently cleaning the Room
 ## addressed by room_type_id + instance_id, for UI/tests -- e.g. whether
 ## it's a valid Stacking drop target and whether it's already full.

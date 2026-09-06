@@ -12,14 +12,17 @@ extends Node2D
 ## ease_to_fit_all() (wired to a HUD button by main_screen.gd). Ticket 07
 ## adds the three Station posts and every Staffer standing at one or in the
 ## staff nook. Ticket 08 adds every Room floor's two bays -- a built Room,
-## a Build Slot, or an empty shell, tappable via room_slot_tapped -- so only
-## guest occupancy sprites, the Match hint glow, and the elevator remain
-## later tickets' job.
+## a Build Slot, or an empty shell, tappable via room_slot_tapped. Ticket 09
+## adds the Terrace's signage (tappable via terrace_tapped) and every
+## Walk-in Diner/Dining Party standing at the pass or the entrance queue --
+## so only lobby guest sprites, the Match hint glow, and the elevator
+## remain later tickets' job.
 
 const BuildingLayout = preload("res://sim/building_layout.gd")
 const CharacterSprite = preload("res://ui/character_sprite.gd")
 const StafferActor = preload("res://ui/staffer_actor.gd")
 const RoomBayActor = preload("res://ui/room_bay_actor.gd")
+const DinerActor = preload("res://ui/diner_actor.gd")
 const Station = preload("res://sim/station.gd")
 
 ## Most-zoomed-in Camera2D.zoom value this world allows. Confirmed
@@ -61,6 +64,12 @@ signal staffer_tapped(staffer_id: String)
 ## existing _on_hotel_slot_selected handler needs no changes to serve both.
 signal room_slot_tapped(room_type_id: String, instance_id: int)
 
+## Emitted whenever the Terrace's signage is tapped (ticket 09, ADR-0010's
+## "tap the structure" gesture) so main_screen can open the existing
+## Terrace menu, same contract as ui/terrace_panel.gd's retired
+## terrace_tapped signal.
+signal terrace_tapped
+
 ## Sky tint per Clock.Phase (autoload/clock.gd), keyed by the enum's plain
 ## int value (MORNING=0, MIDDAY=1, EVENING=2, NIGHT=3) rather than the enum
 ## type itself, since Clock has no class_name to reference statically.
@@ -97,6 +106,14 @@ var _cached_stations_signature := ""
 var _room_bay_actors: Dictionary = {}
 var _cached_rooms_signature := ""
 
+## Ticket 09: the Terrace's signage tap target, and every diner actor
+## (Sim.walkin_queue entry id -> DinerActor), rebuilt whenever
+## Sim.walkin_queue or its in-flight dinner Jobs change -- see _process()'s
+## signature check below, same pattern as _cached_stations_signature.
+var _terrace_tap_rect: Rect2 = Rect2()
+var _diner_actors: Dictionary = {}
+var _cached_dining_signature := ""
+
 ## Non-empty while a Staffer is picked up (press landed on a StafferActor's
 ## hit_rect()) -- the id being dragged, its press-time world position (for
 ## the tap-vs-drag threshold), and a semi-transparent ghost sprite
@@ -113,6 +130,13 @@ var _drag_preview: CharacterSprite = null
 ## already are with each other.
 var _press_bay_actor: RoomBayActor = null
 var _press_bay_start_world := Vector2.ZERO
+
+## Non-empty while a press has landed on the Terrace's signage tap target,
+## awaiting release to decide tap vs. abandoned press -- same
+## TAP_MOVEMENT_THRESHOLD-gated shape as _press_bay_actor above, mutually
+## exclusive with a Staffer drag, a Room bay press, and camera panning.
+var _press_terrace := false
+var _press_terrace_start_world := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -168,6 +192,16 @@ func _process(_delta: float) -> void:
 	if rooms_signature != _cached_rooms_signature:
 		_rebuild_room_bays(BuildingLayout.floors(GameState.rooms, GameState.stars))
 
+	## A Walk-in Diner/Dining Party arriving, being claimed by a Kitchen
+	## Staffer, being served, or walking away all change walkin_queue and/or
+	## its in-flight dinner Jobs without changing the floor stack, so (same
+	## pattern as the two signature checks above) only the diner actors need
+	## rebuilding.
+	var dining_signature := _dining_signature()
+	if dining_signature != _cached_dining_signature:
+		_cached_dining_signature = dining_signature
+		_rebuild_diners(BuildingLayout.floors(GameState.rooms, GameState.stars))
+
 
 ## --- Building composition ---
 
@@ -193,6 +227,9 @@ func _rebuild_building() -> void:
 	_rebuild_staffers(floors)
 	_cached_stations_signature = str(GameState.stations)
 	_rebuild_room_bays(floors)
+	_terrace_tap_rect = BuildingLayout.resolve_terrace_signage_rect(floors)
+	_rebuild_diners(floors)
+	_cached_dining_signature = _dining_signature()
 
 	_fit_all_zoom = _fit_zoom(BuildingLayout.fit_all_bounds(floors))
 
@@ -370,6 +407,39 @@ func _rebuild_room_bays(floors: Array) -> void:
 			_room_bay_actors["%s:%d" % [room_type_id, bay_index]] = actor
 
 	_cached_rooms_signature = str(GameState.hotel_rooms)
+
+
+## --- Terrace: signage tap target, and diner placement (ticket 09) ---
+##
+## The Terrace's signage is the one tap target on its band (ADR-0010's
+## "tap the structure" gesture) -- opens the existing Terrace menu
+## unchanged (main_screen._on_terrace_tapped). Every Sim.walkin_queue entry
+## (Walk-in Diner or Dining Party alike, CONTEXT.md) stands either at the
+## pass (being served -- Sim.dinner_jobs() names its entry_id) or the
+## entrance queue (still waiting), per
+## BuildingLayout.terrace_diner_placements() -- so a busy dinner service
+## reads as diners visibly seated along the pass, and the number of diners
+## on screen always tracks Sim.walkin_queue's own size, with no list to
+## read.
+
+func _rebuild_diners(floors: Array) -> void:
+	for actor in _diner_actors.values():
+		actor.queue_free()
+	_diner_actors.clear()
+
+	var placements := BuildingLayout.terrace_diner_placements(Sim.walkin_queue, Sim.dinner_jobs())
+	for entry in Sim.walkin_queue:
+		var entry_id: int = int(entry["id"])
+		var point: Vector2 = BuildingLayout.resolve_terrace_diner_point(floors, placements[entry_id])
+		var actor := DinerActor.new()
+		_building.add_child(actor)
+		actor.configure(String(entry["species_id"]))
+		actor.position = point
+		_diner_actors[entry_id] = actor
+
+
+func _dining_signature() -> String:
+	return str(Sim.walkin_queue) + "|" + str(Sim.dinner_jobs())
 
 
 ## --- Staffer tap/drag (ticket 07) ---
@@ -561,6 +631,11 @@ func _on_press(world_pos: Vector2) -> void:
 		_press_bay_start_world = world_pos
 		return
 
+	if _terrace_tap_rect.has_point(world_pos):
+		_press_terrace = true
+		_press_terrace_start_world = world_pos
+		return
+
 	_dragging = true
 
 
@@ -571,6 +646,10 @@ func _on_release(world_pos: Vector2) -> void:
 		if world_pos.distance_to(_press_bay_start_world) < TAP_MOVEMENT_THRESHOLD:
 			room_slot_tapped.emit(_press_bay_actor.room_type_id, _press_bay_actor.instance_id)
 		_press_bay_actor = null
+	elif _press_terrace:
+		if world_pos.distance_to(_press_terrace_start_world) < TAP_MOVEMENT_THRESHOLD:
+			terrace_tapped.emit()
+		_press_terrace = false
 	else:
 		_dragging = false
 

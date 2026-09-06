@@ -250,6 +250,16 @@ const TERRACE_DINER_GRID_COLUMNS := 2
 ## none of the three collide.
 const TERRACE_KITCHEN_PASS_LOCAL := Vector2(INTERIOR_LEFT + 292.0, 30.0)
 
+## Tap target for the Terrace's signage (ticket 09, ADR-0010's "tap the
+## structure" gesture) -- a generous rect over the floor sign's own top-left
+## corner (see _add_floor_sign()'s Label position), well past the sign
+## text's own bounds so the gesture is forgiving, mirroring
+## ui/hotel_world.gd's STATION_POST_HIT_SIZE being larger than a Station
+## prop's render footprint. Sits over the frame column/shaft region rather
+## than the interior -- harmless, since neither is a tap target of its own
+## on the Terrace band.
+const TERRACE_SIGNAGE_RECT_LOCAL := Rect2(Vector2(0.0, 0.0), Vector2(180.0, 36.0))
+
 
 ## Local-space rect for a Room floor's bay 0 (left) or bay 1 (right),
 ## spanning the floor's own full height -- so a shorter painted floor
@@ -302,6 +312,8 @@ static func _named_anchor_local(kind: String, name: String, height: float) -> Va
 	elif kind == "terrace":
 		if name == "kitchen_pass":
 			return TERRACE_KITCHEN_PASS_LOCAL
+		if name == "signage":
+			return TERRACE_SIGNAGE_RECT_LOCAL
 	return null
 
 
@@ -716,3 +728,59 @@ static func _resolve_static_icon(dir: String, id: String, size: Vector2, probe_f
 
 static func _probe_exists(path: String) -> bool:
 	return ResourceLoader.exists(path)
+
+
+## --- Terrace: signage tap target, and diner placement (ticket 09) ---
+##
+## The Terrace is always floors_bottom_to_top's second entry (index
+## TERRACE_LEVEL), same fixed-index reasoning
+## resolve_station_post_anchor() already relies on for Reception/Terrace's
+## own posts -- so both resolvers below hardcode that index rather than
+## searching for it.
+
+## World-space tap target for the Terrace's signage -- ADR-0010's "tap the
+## structure" gesture, opening the existing Terrace menu unchanged.
+static func resolve_terrace_signage_rect(floors_bottom_to_top: Array) -> Rect2:
+	return resolve_anchor(floors_bottom_to_top, TERRACE_LEVEL, "signage")
+
+
+## Every Sim.walkin_queue entry (a Walk-in Diner or a Dining Party alike --
+## both share that one queue, CONTEXT.md) lands in one of two buckets:
+## "pass" if a Kitchen Staffer is actively serving it (its "id" appears as
+## an "entry_id" among `dinner_jobs`' values -- Sim._dinner_jobs' own
+## shape, staffer_id -> {entry_id, ticks_remaining}), so a busy dinner
+## service reads as diners visibly seated along the pass; "queue" otherwise,
+## still waiting at the Terrace entrance. Same shape as
+## staffer_placements() -- deterministic, keyed by each entry's own "id" --
+## except ordering follows walkin_queue's own insertion order within each
+## bucket rather than an alphabetical sort, since (unlike a Staffer id)
+## there's no natural sort key to prefer over arrival order.
+static func terrace_diner_placements(walkin_queue: Array, dinner_jobs: Dictionary) -> Dictionary:
+	var served_entry_ids: Dictionary = {}
+	for job in dinner_jobs.values():
+		served_entry_ids[int(job["entry_id"])] = true
+
+	var out: Dictionary = {}
+	var pass_index := 0
+	var queue_index := 0
+	for entry in walkin_queue:
+		var entry_id: int = int(entry["id"])
+		if served_entry_ids.has(entry_id):
+			out[entry_id] = {"bucket": "pass", "index": pass_index}
+			pass_index += 1
+		else:
+			out[entry_id] = {"bucket": "queue", "index": queue_index}
+			queue_index += 1
+	return out
+
+
+## World position for a diner's placement (as returned by
+## terrace_diner_placements() above): the diner grid for a "pass" bucket,
+## the entrance queue line for a "queue" bucket -- mirrors
+## resolve_staffer_point()'s bucket-to-anchor split.
+static func resolve_terrace_diner_point(floors_bottom_to_top: Array, placement: Dictionary) -> Vector2:
+	var bucket: String = String(placement["bucket"])
+	var index: int = int(placement["index"])
+	if bucket == "pass":
+		return resolve_terrace_diner_spot(floors_bottom_to_top, TERRACE_LEVEL, index)
+	return resolve_terrace_entrance_queue_point(floors_bottom_to_top, TERRACE_LEVEL, index)

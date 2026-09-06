@@ -118,6 +118,18 @@ func test_kitchen_staffer_above_breakfast_but_below_dinner_serves_breakfast_only
 	assert_true(Sim.dinner_job("shelly").is_empty())
 
 
+func test_dinner_jobs_snapshot_reflects_every_in_flight_job() -> void:
+	Sim.assign_staffer("manny", "kitchen") # no Room guest seated, so the breakfast queue stays empty and can't claim him first
+	_push_walkin(1, 999.0)
+
+	Clock.force_advance_ticks(1) # Manny claims the Walk-in Diner
+
+	var jobs := Sim.dinner_jobs()
+	assert_eq(jobs.keys().size(), 1)
+	assert_true(jobs.has("manny"))
+	assert_eq(int(jobs["manny"]["entry_id"]), 1)
+
+
 func test_reassigning_a_kitchen_staffer_mid_dinner_job_interrupts_only_their_job() -> void:
 	Sim.assign_staffer("shelly", "kitchen") # skill 2, breakfast only
 	Sim.assign_staffer("manny", "kitchen") # skill 3, clears the dinner threshold too
