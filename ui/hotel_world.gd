@@ -1589,6 +1589,42 @@ func ease_to_fit_all(duration: float = FIT_ALL_EASE_SECONDS) -> void:
 	tween.tween_property(_camera, "zoom", Vector2(_fit_all_zoom, _fit_all_zoom), duration)
 
 
+## Projects a world-space point into this viewport's screen space through the
+## active camera -- viewport_center + (world - camera position) * zoom, the
+## same relationship _pan_by()'s own screen-to-world conversion already
+## relies on (see MAX_ZOOM's comment for the empirically-confirmed zoom
+## convention). Ticket 15: lets ui/toast_layer.gd track a toast's world
+## anchor on screen every frame without re-deriving it from a Control rect,
+## and lets it detect when that anchor has panned/zoomed outside the current
+## framing (spec.md's "an event whose anchor is outside the current framing
+## raises a small arrow marker").
+func world_to_screen(world_pos: Vector2) -> Vector2:
+	if _camera == null:
+		return world_pos
+	var viewport_center := get_viewport_rect().size / 2.0
+	return viewport_center + (world_pos - _camera.global_position) * _camera.zoom.x
+
+
+## Eases the camera to center on a world point at its CURRENT zoom level --
+## unlike ease_to_fit_all(), which also changes zoom to frame the whole
+## building. Ticket 15: wired to a toast's edge marker (spec.md story 52,
+## "tapping that marker pans the camera to the event"). The same
+## hud_top_margin nudge ease_to_fit_all() applies keeps the target from
+## landing directly under the HUD strip.
+func pan_to_world_point(world_pos: Vector2, duration: float = FIT_ALL_EASE_SECONDS) -> void:
+	if _camera == null:
+		return
+	var target := world_pos
+	target.y -= hud_top_margin / (2.0 * _camera.zoom.x)
+
+	if duration <= 0.0:
+		_camera.global_position = target
+		return
+
+	var tween := create_tween()
+	tween.tween_property(_camera, "global_position", target, duration)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if _camera == null:
 		return

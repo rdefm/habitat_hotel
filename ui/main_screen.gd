@@ -97,6 +97,20 @@ func _ready() -> void:
 	_popup_host = PopupHost.new()
 	hud_layer.add_child(_popup_host)
 
+	## Toast layer (ticket 08, ADR-0016; ticket 15, ADR-0020): another
+	## screen-space HUD-layer overlay -- world mode (USE_HOTEL_WORLD) tracks
+	## each toast's fixed world anchor projected through hotel_world.gd's own
+	## camera rather than a Control rect; the old Control mode (still needed
+	## until ticket 17 retires it) keeps re-deriving anchors from
+	## _hotel_panel/_reception_panel exactly as before.
+	_toast_layer = ToastLayer.new()
+	if USE_HOTEL_WORLD:
+		_toast_layer.hotel_world = _hotel_world
+	else:
+		_toast_layer.hotel_panel = _hotel_panel
+		_toast_layer.reception_panel = _reception_panel
+	hud_layer.add_child(_toast_layer)
+
 	set_process(true)
 
 
@@ -144,14 +158,6 @@ func _build_old_hotel_view() -> void:
 	_staff_job_travel_layer.station_panel = _station_panel
 	_staff_job_travel_layer.terrace_panel = _terrace_panel
 	add_child(_staff_job_travel_layer)
-
-	## Toast layer (ticket 08, ADR-0016): another screen-space overlay
-	## sibling, mounted above _room_occupancy_layer so a toast never renders
-	## underneath a walk-in/checkout actor anchored at the same spot.
-	_toast_layer = ToastLayer.new()
-	_toast_layer.hotel_panel = _hotel_panel
-	_toast_layer.reception_panel = _reception_panel
-	add_child(_toast_layer)
 
 
 func _process(_delta: float) -> void:
