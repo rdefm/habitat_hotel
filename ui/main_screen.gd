@@ -1,6 +1,6 @@
 extends Control
 
-## Chunk 2 main screen: top bar, a decorative hotel panel, a toast layer
+## Chunk 2 main screen: HUD strip, a decorative hotel panel, a toast layer
 ## (ticket 08, ADR-0016; replaces the old scrolling day-log ticker), a
 ## generic modal overlay, and a bespoke small-popup host (ADR-0011; see
 ## ui/popup_host.gd). This is the Fun Gate's actual playable surface --
@@ -14,6 +14,7 @@ extends Control
 
 const HotelView = preload("res://ui/hotel_view.gd")
 const HotelWorld = preload("res://ui/hotel_world.gd")
+const HudStrip = preload("res://ui/hud_strip.gd")
 const HotelPanel = preload("res://ui/hotel_panel.gd")
 const ReceptionPanel = preload("res://ui/reception_panel.gd")
 const StationPanel = preload("res://ui/station_panel.gd")
@@ -42,16 +43,7 @@ const ToastLayer = preload("res://ui/toast_layer.gd")
 ## its diner placement, so all three are tappable already.
 const USE_HOTEL_WORLD := true
 
-var _cash_label: Label
-var _hearts_label: Label
-var _reputation_label: Label
-var _stars_label: Label
-var _day_label: Label
-var _season_label: Label
-var _pause_button: Button
-var _play_button: Button
-var _fast_button: Button
-var _fit_all_button: Button
+var _hud_strip: HudStrip
 
 var _overlay: Control
 var _overlay_title: Label
@@ -73,6 +65,12 @@ func _ready() -> void:
 
 	if USE_HOTEL_WORLD:
 		_hotel_world = HotelWorld.new()
+		## Ticket 14: set before add_child() so it's already in place when
+		## HotelWorld's own _ready() calls ease_to_fit_all(0.0) -- otherwise
+		## the very first frame would frame the building under the HUD
+		## strip's default (unset) zero margin, then visibly jump once this
+		## line ran.
+		_hotel_world.hud_top_margin = HudStrip.HEIGHT
 		add_child(_hotel_world)
 		_hotel_world.staffer_tapped.connect(_on_staffer_tapped)
 		_hotel_world.room_slot_tapped.connect(_on_hotel_slot_selected)
@@ -89,26 +87,21 @@ func _ready() -> void:
 	var hud_layer := CanvasLayer.new()
 	add_child(hud_layer)
 
-	var top_bar := _build_top_bar()
-	var top_bar_backing := PanelContainer.new()
-	top_bar_backing.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	var backing_style := StyleBoxFlat.new()
-	backing_style.bg_color = Color(0, 0, 0, 0.55)
-	top_bar_backing.add_theme_stylebox_override("panel", backing_style)
-	top_bar_backing.add_child(top_bar)
-	hud_layer.add_child(top_bar_backing)
+	_hud_strip = HudStrip.new()
+	hud_layer.add_child(_hud_strip)
+	if USE_HOTEL_WORLD:
+		_hud_strip.configure(_hotel_world.ease_to_fit_all)
 
 	_build_overlay(hud_layer)
 
 	_popup_host = PopupHost.new()
 	hud_layer.add_child(_popup_host)
 
-	_refresh_top_bar()
 	set_process(true)
 
 
 ## The pre-ADR-0020 Control/ScrollContainer view (ticket 02, ADR-0016),
-## unchanged except that the top bar it used to sit below has moved into
+## unchanged except that the HUD strip it used to sit below has moved into
 ## the HUD CanvasLayer built by _ready() -- this view now fills the whole
 ## screen behind that overlay strip rather than sharing a VBoxContainer
 ## with it.
@@ -162,69 +155,7 @@ func _build_old_hotel_view() -> void:
 
 
 func _process(_delta: float) -> void:
-	_refresh_top_bar()
-
-
-## --- Top bar ---
-
-func _build_top_bar() -> HBoxContainer:
-	var bar := HBoxContainer.new()
-	bar.add_theme_constant_override("separation", 18)
-
-	_cash_label = Label.new()
-	_hearts_label = Label.new()
-	_reputation_label = Label.new()
-	_stars_label = Label.new()
-	_day_label = Label.new()
-	_season_label = Label.new()
-	for l in [_cash_label, _hearts_label, _reputation_label, _stars_label, _day_label, _season_label]:
-		bar.add_child(l)
-
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(spacer)
-
-	_pause_button = Button.new()
-	_pause_button.text = "Pause"
-	_pause_button.pressed.connect(func(): Clock.set_paused(true))
-	bar.add_child(_pause_button)
-
-	_play_button = Button.new()
-	_play_button.text = "1x"
-	_play_button.pressed.connect(func():
-		Clock.set_paused(false)
-		Clock.set_speed(1.0)
-	)
-	bar.add_child(_play_button)
-
-	_fast_button = Button.new()
-	_fast_button.text = "2x"
-	_fast_button.pressed.connect(func():
-		Clock.set_paused(false)
-		Clock.set_speed(2.0)
-	)
-	bar.add_child(_fast_button)
-
-	## Ticket 04 (ADR-0020): the camera's "ease back to fit-all" control.
-	## Only meaningful with the Node2D world mounted -- the old view has no
-	## camera to reset.
-	if USE_HOTEL_WORLD:
-		_fit_all_button = Button.new()
-		_fit_all_button.text = "Fit All"
-		_fit_all_button.pressed.connect(func(): _hotel_world.ease_to_fit_all())
-		bar.add_child(_fit_all_button)
-
-	return bar
-
-
-func _refresh_top_bar() -> void:
-	_cash_label.text = "Cash: %d" % GameState.cash
-	_cash_label.modulate = Color(1, 0.55, 0.55) if GameState.cash < 0 else Color(1, 1, 1)
-	_hearts_label.text = "Hearts: %d" % GameState.hearts
-	_reputation_label.text = "Reputation: %d" % GameState.reputation
-	_stars_label.text = "%d star" % GameState.stars
-	_day_label.text = "Day %d" % GameState.day
-	_season_label.text = GameState.season.capitalize()
+	_hud_strip.refresh()
 
 
 ## --- Hotel panel (the always-visible grid) ---

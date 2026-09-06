@@ -187,6 +187,18 @@ var _sky: ColorRect
 var _cached_floor_count := -1
 var _fit_all_zoom := 1.0
 
+## Screen pixels reserved at the top of the viewport for main_screen.gd's
+## HudStrip (ticket 14) -- set by main_screen.gd before this node is added
+## to the tree (so the very first ease_to_fit_all() already honours it),
+## never mutated here. Zero (the default) reproduces this file's original,
+## pre-ticket-14 fit-all framing exactly, which is what every camera/fit-all
+## test-by-playtest has always exercised. Folded into both _fit_zoom() (so a
+## tall building doesn't zoom in past the strip) and ease_to_fit_all()'s
+## vertical centering (so the building is nudged down, out from under it)
+## rather than into a separate "safe area" concept, since fit-all's own zoom
+## and position are the only two places the strip's height needs to matter.
+var hud_top_margin: float = 0.0
+
 var _dragging := false
 
 ## Ticket 07: Station posts (station_id -> world Rect2 drop-target) and
@@ -1545,7 +1557,8 @@ func _fit_zoom(bounds: Rect2) -> float:
 	var viewport_size := get_viewport_rect().size
 	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0 or bounds.size.x <= 0.0 or bounds.size.y <= 0.0:
 		return 1.0
-	return minf(viewport_size.x / bounds.size.x, viewport_size.y / bounds.size.y)
+	var available_height: float = maxf(viewport_size.y - hud_top_margin, 1.0)
+	return minf(viewport_size.x / bounds.size.x, available_height / bounds.size.y)
 
 
 ## Eases the camera back to framing the whole building. Called on ready, on
@@ -1555,6 +1568,14 @@ func ease_to_fit_all(duration: float = FIT_ALL_EASE_SECONDS) -> void:
 	var bounds := BuildingLayout.fit_all_bounds(floors)
 	_fit_all_zoom = _fit_zoom(bounds)
 	var target_position: Vector2 = bounds.position + bounds.size / 2.0
+	## Shifts the framing down by half the reserved margin's world-space
+	## equivalent at this zoom -- when the strip's height is exactly what
+	## _fit_zoom() above trimmed from available_height (the tall-building,
+	## height-bound case), this lands the roofline exactly at
+	## hud_top_margin on screen and the ground flush at the viewport's
+	## bottom edge; when width binds instead (a short building), it's a
+	## smaller partial nudge off dead-center, never a full recentre.
+	target_position.y -= hud_top_margin / (2.0 * _fit_all_zoom)
 
 	if duration <= 0.0 or _camera == null:
 		if _camera != null:
