@@ -856,3 +856,60 @@ static func room_bay_match_hint(selected_party_id: int, room_type_id: String, in
 	if selected_party_id == -1:
 		return "none"
 	return hint_fn.call(selected_party_id, room_type_id, instance_id) if hint_fn.is_valid() else Sim.match_hint(selected_party_id, room_type_id, instance_id)
+
+
+## --- Room occupants: fixed in-bay spots and elevator floor lookup (ticket 12) ---
+##
+## A built Room's occupant guest(s) stand at fixed spots within their own bay
+## for the whole stay (spec.md story 24) -- a small grid, same shape as
+## terrace_diner_spot_local()'s pass grid, capped at ROOM_OCCUPANT_MAX_VISIBLE
+## so an upgraded Room's higher capacity (up to 6, e.g. Roost Loft + Wider
+## Perches) never visually overflows its own ~166px-wide bay. This is a
+## cosmetic cap, the same "not authoritative" trade-off the mess overlay and
+## upgrade props already make -- ui/hotel_world.gd reads GameState/Sim
+## itself for occupancy/party_size/species; this module only answers WHERE
+## each visible member stands.
+
+const ROOM_OCCUPANT_GRID_ORIGIN := Vector2(30.0, 30.0)
+const ROOM_OCCUPANT_GRID_SPACING := Vector2(90.0, 65.0)
+const ROOM_OCCUPANT_GRID_COLUMNS := 2
+const ROOM_OCCUPANT_MAX_VISIBLE := 4
+
+
+static func room_occupant_point_local(member_index: int) -> Vector2:
+	var col := member_index % ROOM_OCCUPANT_GRID_COLUMNS
+	var row := int(member_index / ROOM_OCCUPANT_GRID_COLUMNS)
+	return ROOM_OCCUPANT_GRID_ORIGIN + Vector2(float(col) * ROOM_OCCUPANT_GRID_SPACING.x, float(row) * ROOM_OCCUPANT_GRID_SPACING.y)
+
+
+## One local point per visible member, up to ROOM_OCCUPANT_MAX_VISIBLE.
+static func room_occupant_placements(party_size: int) -> Array:
+	var out: Array = []
+	for i in range(mini(party_size, ROOM_OCCUPANT_MAX_VISIBLE)):
+		out.append(room_occupant_point_local(i))
+	return out
+
+
+## World position for occupant member_index of the built Room at bay_index on
+## floor index i -- combines that bay's own rect (room_bay_rect_local()) with
+## the in-bay grid point above, through the same floor-top-edge translation
+## _resolve_local_point() already performs for every other indexed anchor in
+## this file.
+static func resolve_room_occupant_point(floors_bottom_to_top: Array, i: int, bay_index: int, member_index: int) -> Vector2:
+	var height: float = float(floors_bottom_to_top[i]["height"])
+	var bay_local: Vector2 = room_bay_rect_local(bay_index, height).position
+	return _resolve_local_point(floors_bottom_to_top, i, bay_local + room_occupant_point_local(member_index))
+
+
+## The floor index (within floors_bottom_to_top) of the Room floor for
+## room_type_id -- the elevator journey (ui/hotel_world.gd, ticket 12) needs
+## this to find a check-in/checkout's destination/origin elevator_door
+## anchor without re-deriving floors()'s ordering itself. -1 if room_type_id
+## isn't a currently unlocked Room floor (defensive only -- every caller
+## sources room_type_id from a live GameState.hotel_rooms entry).
+static func floor_index_for_room_type(floors_bottom_to_top: Array, room_type_id: String) -> int:
+	for i in range(floors_bottom_to_top.size()):
+		var f: Dictionary = floors_bottom_to_top[i]
+		if f["kind"] == "room" and f["room_type_id"] == room_type_id:
+			return i
+	return -1

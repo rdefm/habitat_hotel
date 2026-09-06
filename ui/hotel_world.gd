@@ -27,12 +27,27 @@ extends Node2D
 ## itself a thin wrapper over the existing Sim.match_hint() -- no hint logic
 ## duplicated here). A guest drag also auto-pans the camera near the top/
 ## bottom screen edge, so a lobby-to-top-floor drag is reachable at any
-## zoom. Only the elevator remains a later ticket's job.
+## zoom. Ticket 12 adds the elevator journey: on EventBus.guest_seated a
+## fresh actor idles at the front desk until Sim's checkin.delay_ticks
+## countdown (room["checking_in"]) resolves, then walks to the shaft, rides
+## to the Room's own floor, and walks into its bay -- see
+## _on_guest_seated()/_begin_checkin_ride()'s header comments. A settled
+## occupant then renders every rebuild via RoomOccupantActor, at fixed spots
+## in its bay (BuildingLayout.room_occupant_placements()), sleeping with a
+## Zz at Night. EventBus.guest_checked_out plays the exact reverse journey;
+## EventBus.guest_turned_away walks every member of a lost Party's own
+## lobby actors back out through the lobby, no elevator involved. Every
+## journey is real-time-tweened and decoupled from Sim's own tick-driven
+## timing (spec.md: "the animation never gates the simulation") -- the wait
+## is polled against Sim's own flag rather than re-timed to match it, and a
+## Room whose journey is still in flight is skipped by the ordinary
+## occupant render pass so the two never show the guest twice.
 
 const BuildingLayout = preload("res://sim/building_layout.gd")
 const CharacterSprite = preload("res://ui/character_sprite.gd")
 const StafferActor = preload("res://ui/staffer_actor.gd")
 const RoomBayActor = preload("res://ui/room_bay_actor.gd")
+const RoomOccupantActor = preload("res://ui/room_occupant_actor.gd")
 const DinerActor = preload("res://ui/diner_actor.gd")
 const GuestActor = preload("res://ui/guest_actor.gd")
 const NeedsBubble = preload("res://ui/needs_bubble.gd")
@@ -84,6 +99,35 @@ const NEEDS_BUBBLE_OFFSET := Vector2(0.0, -BuildingLayout.CHARACTER_FRAME_SIZE -
 ## and the target floor isn't visible until it scrolls in).
 const AUTO_PAN_EDGE_ZONE := 60.0
 const AUTO_PAN_SPEED := 500.0
+
+## Ticket 12: fixed real-time durations for a guest journey's three legs
+## (walk to/from the shaft, ride, walk to/from the destination spot) --
+## deliberately NOT derived from Sim's own tick counts (spec.md: "the
+## elevator introduces no capacity limit, no queueing rule, and no new Sim
+## state"; "the animation never gates the simulation"). The ride leg scales
+## a little with floor distance so a top-floor trip reads as further than a
+## Terrace-level hop, clamped so neither a same-floor edge case nor a very
+## tall building produces a silly duration.
+const JOURNEY_WALK_DURATION := 0.5
+const JOURNEY_RIDE_DURATION_PER_FLOOR := 0.3
+const JOURNEY_RIDE_DURATION_MIN := 0.3
+const JOURNEY_RIDE_DURATION_MAX := 1.5
+const JOURNEY_TURN_AWAY_DURATION := 0.8
+
+## A small riding-only decoration parented to the travelling actor for the
+## shaft-transit leg only (added/removed by _attach_elevator_car()/
+## _detach_elevator_car()) -- "rides the car" (spec.md story 23) without a
+## separate persistent car node to manage capacity/collision for, which the
+## spec explicitly says the elevator never has.
+const ELEVATOR_CAR_SIZE := Vector2(50.0, 70.0)
+const ELEVATOR_CAR_COLOR := Color(0.55, 0.55, 0.6, 0.85)
+
+## How far outside Reception's own front_desk anchor a turned-away Party or
+## a checked-out guest walks out through -- there's no dedicated entrance
+## anchor in the registry, so this is a fixed offset to the left of the
+## building's own x=0 edge (BuildingLayout.BUILDING_WIDTH), mirroring the
+## retired ui/room_occupancy_layer.gd's ENTRANCE_OFFSET_X.
+const LOBBY_EXIT_LOCAL_X := -40.0
 
 ## Emitted whenever a Staffer is tapped (a press/release with no drag) so
 ## main_screen can open their existing Skill/Trait detail popup -- same
@@ -165,6 +209,27 @@ var _cached_dining_signature := ""
 ## arrivals/departures -- mirroring _rebuild_diners()'s identical tradeoff.
 var _lobby_guest_actors: Dictionary = {}
 var _cached_lobby_signature := ""
+
+## Ticket 12: every settled Room occupant's actor(s) -- room_key
+## ("<room_type_id>:<instance_id>") -> Array[RoomOccupantActor] -- rebuilt
+## alongside _room_bay_actors whenever the rooms signature changes (see
+## _rooms_signature(), which folds in Clock.current_phase so a Night
+## transition alone -- no hotel_rooms change -- still triggers the sleeping
+## Zz swap). A room_key present in _active_room_journeys is skipped by that
+## rebuild: the journey, not this dict, owns that Room's visible guest until
+## it arrives (or leaves).
+var _room_occupant_actors: Dictionary = {}
+
+## Ticket 12: every in-flight guest journey (check-in or checkout), keyed by
+## the SAME room_key _room_occupant_actors uses -- {phase: "waiting"|"moving",
+## actor: CharacterSprite, tween: Tween, room_type_id: String, instance_id:
+## int, species_id: String}. "waiting" is check-in-only (idling at the front
+## desk until room["checking_in"] resolves, polled in _process() below);
+## "moving" covers every walking/riding leg of either journey, driven
+## entirely by the leg's own Tween and its finish callbacks. A checkout
+## journey starts straight in "moving" -- there's no Sim-side delay to wait
+## out on the way down, unlike check-in's flat checkin.delay_ticks.
+var _active_room_journeys: Dictionary = {}
 
 ## Non-null while a Needs bubble is open (ticket 10) -- popped by tapping a
 ## lobby guest, closed by tapping that same guest again, tapping elsewhere,
@@ -267,6 +332,18 @@ func _ready() -> void:
 	_rebuild_building()
 	ease_to_fit_all(0.0)
 
+	## Ticket 12: connected here (a scene node's _ready(), not an autoload's)
+	## so that Sim's own EventBus connections -- made in its _ready(), which
+	## always runs before any scene node's per Godot's autoload-before-
+	## main-scene load order -- have already mutated GameState/pending_arrivals
+	## by the time these run. _on_guest_turned_away() relies on exactly this
+	## ordering to still find the departing Party's lobby actors before this
+	## node's own next _process() rebuild removes them (same guarantee the
+	## retired ui/room_occupancy_layer.gd documented for the same reason).
+	EventBus.guest_seated.connect(_on_guest_seated)
+	EventBus.guest_checked_out.connect(_on_guest_checked_out)
+	EventBus.guest_turned_away.connect(_on_guest_turned_away)
+
 	set_process(true)
 	set_process_unhandled_input(true)
 
@@ -276,6 +353,8 @@ func _process(delta: float) -> void:
 
 	if _drag_staffer_id != "" or _drag_guest_key != "":
 		_auto_pan_if_near_edge(delta)
+
+	_poll_waiting_journeys()
 
 	var floor_count := BuildingLayout.unlocked_room_type_ids_ascending(GameState.rooms, GameState.stars).size()
 	if floor_count != _cached_floor_count:
@@ -296,7 +375,10 @@ func _process(delta: float) -> void:
 	## A build, a checkout, a cleaning finishing, or an upgrade purchase all
 	## change hotel_rooms without changing the floor stack itself, so (like
 	## Staffer reassignment above) only the Room bay actors need rebuilding.
-	var rooms_signature := str(GameState.hotel_rooms)
+	## Ticket 12: _rooms_signature() also folds in Clock.current_phase, since
+	## a Night transition alone (no hotel_rooms mutation) still needs to swap
+	## every settled occupant to its sleeping state.
+	var rooms_signature := _rooms_signature()
 	if rooms_signature != _cached_rooms_signature:
 		_rebuild_room_bays(BuildingLayout.floors(GameState.rooms, GameState.stars))
 
@@ -324,6 +406,20 @@ func _process(delta: float) -> void:
 ## --- Building composition ---
 
 func _rebuild_building() -> void:
+	## Ticket 12: a floor unlocking mid-journey is a rare edge case (a
+	## structural rebuild otherwise only happens on a floor unlock), but a
+	## journey's actor is a child of _building about to be freed below, and
+	## its Tween would otherwise keep trying to animate a freed object --
+	## kill every in-flight journey's Tween first rather than let that
+	## surface as an engine error. The Room simply renders without its guest
+	## visible until Sim resolves it (checking_in flag, or a fresh
+	## occupant), same graceful-degradation trade-off this file already
+	## accepts elsewhere for a rebuild landing mid-gesture.
+	for j in _active_room_journeys.values():
+		if j.get("tween") != null and j["tween"].is_valid():
+			j["tween"].kill()
+	_active_room_journeys.clear()
+
 	for child in _building.get_children():
 		child.queue_free()
 
@@ -502,6 +598,11 @@ func _rebuild_room_bays(floors: Array) -> void:
 		actor.queue_free()
 	_room_bay_actors.clear()
 
+	for actors in _room_occupant_actors.values():
+		for actor in actors:
+			actor.queue_free()
+	_room_occupant_actors.clear()
+
 	for i in range(floors.size()):
 		var f: Dictionary = floors[i]
 		if f["kind"] != "room":
@@ -519,6 +620,7 @@ func _rebuild_room_bays(floors: Array) -> void:
 			if bay_state["state"] == "built":
 				var room := GameState.room_instance(room_type_id, int(bay_state["instance_id"]))
 				visual_state = BuildingLayout.room_bay_visual_state(room)
+				_rebuild_room_occupants(floors, i, room_type_id, int(bay_state["instance_id"]), room)
 
 			var actor := RoomBayActor.new()
 			_building.add_child(actor)
@@ -526,8 +628,65 @@ func _rebuild_room_bays(floors: Array) -> void:
 			actor.position = rect.position
 			_room_bay_actors["%s:%d" % [room_type_id, bay_index]] = actor
 
-	_cached_rooms_signature = str(GameState.hotel_rooms)
+	_cached_rooms_signature = _rooms_signature()
 	_refresh_bay_match_hints()
+
+
+## Ticket 12: renders a built Room's settled occupant(s), one RoomOccupantActor
+## per visible member at BuildingLayout.resolve_room_occupant_point()'s fixed
+## in-bay spot -- skipped entirely (no actors spawned) while the Room's
+## occupant hasn't visually arrived yet, so the static render and the
+## in-flight journey never show the same guest twice:
+##  - room["checking_in"] is still true (Sim admitted the Party already, but
+##    its flat check-in delay hasn't resolved) -- belt-and-suspenders with
+##    the check below, in case a structural rebuild ever drops the journey
+##    entry itself (see _rebuild_building()'s own comment on that edge case).
+##  - room_key names an entry in _active_room_journeys -- the journey (either
+##    direction) owns this Room's guest right now.
+## Species/party_size come from Sim.guests (the authoritative stay record),
+## not the room's own occupant_species_id/occupant_name mirror fields, since
+## only the guest record carries party_size.
+func _rebuild_room_occupants(floors: Array, floor_index: int, room_type_id: String, instance_id: int, room: Dictionary) -> void:
+	var room_key := _room_key(room_type_id, instance_id)
+	if room.get("checking_in", false) or _active_room_journeys.has(room_key):
+		return
+
+	var occupant_id = room.get("occupant")
+	if occupant_id == null:
+		return
+	var guest: Dictionary = Sim.guests.get(int(occupant_id), {})
+	if guest.is_empty():
+		return
+
+	var species_id: String = String(guest.get("species_id", room.get("occupant_species_id", "")))
+	var party_size: int = int(guest.get("party_size", 1))
+	var sleeping := Clock.current_phase == Clock.Phase.NIGHT
+
+	var actors: Array = []
+	var placements := BuildingLayout.room_occupant_placements(party_size)
+	for member_index in range(placements.size()):
+		var actor := RoomOccupantActor.new()
+		_building.add_child(actor)
+		actor.configure(species_id, sleeping)
+		actor.position = BuildingLayout.resolve_room_occupant_point(floors, floor_index, instance_id, member_index)
+		actors.append(actor)
+	_room_occupant_actors[room_key] = actors
+
+
+## Folds Clock.current_phase into the rooms rebuild signature (_process()'s
+## own gate) so a Night transition alone -- no hotel_rooms mutation -- still
+## re-triggers _rebuild_room_bays() and therefore _rebuild_room_occupants()'s
+## sleeping-state swap.
+func _rooms_signature() -> String:
+	return str(GameState.hotel_rooms) + "|" + str(int(Clock.current_phase))
+
+
+## Shared by every Room-addressing dict in this file (_room_occupant_actors,
+## _active_room_journeys) -- room_type_id + instance_id, matching
+## sim/match_hint.gd's own room_key() shape without importing that class
+## just for this.
+func _room_key(room_type_id: String, instance_id: int) -> String:
+	return "%s:%d" % [room_type_id, instance_id]
 
 
 ## Ticket 11: re-applies the currently selected Party's Match hint glow to
@@ -676,6 +835,241 @@ func _close_needs_bubble() -> void:
 	_needs_bubble_key = ""
 	_selected_party_id = -1
 	_refresh_bay_match_hints()
+
+
+## --- Elevator journeys: check-in, checkout, turn-away (ticket 12) ---
+##
+## Every journey is a single CharacterSprite tweened through world space in
+## real time, decoupled from Sim's own tick-driven timing (spec.md: "the
+## animation never gates the simulation") -- Sim's admission/checkout/
+## walk-away already happened by the time any of these handlers run (same
+## "not a source of truth" caveat EventBus's own class doc carries for these
+## signals), so nothing here can affect or delay it.
+
+func _on_guest_seated(_guest_name: String, species_id: String, room_type_id: String, instance_id: int, _mismatch: bool) -> void:
+	var room_key := _room_key(room_type_id, instance_id)
+	_cancel_journey(room_key) # defensive: a same-Room checkout journey shouldn't collide with a fresh check-in (can't happen today -- a stay is never <1 night -- but see _rebuild_building()'s own defensive cancellation)
+
+	var floors := BuildingLayout.floors(GameState.rooms, GameState.stars)
+	var actor := CharacterSprite.new()
+	_building.add_child(actor)
+	actor.configure(BuildingLayout.resolve_character_sprite("guest", species_id, "idle"))
+	actor.position = BuildingLayout.resolve_anchor(floors, 0, "front_desk")
+
+	_active_room_journeys[room_key] = _new_journey("waiting", actor, room_type_id, instance_id, species_id)
+
+
+## Shared {phase, actor, tween, room_type_id, instance_id, species_id} record
+## shape for _active_room_journeys, built identically by both
+## _on_guest_seated() (phase "waiting") and _on_guest_checked_out() (phase
+## "moving", no wait of its own -- see that function's header comment).
+func _new_journey(phase: String, actor: CharacterSprite, room_type_id: String, instance_id: int, species_id: String) -> Dictionary:
+	return {
+		"phase": phase,
+		"actor": actor,
+		"tween": null,
+		"room_type_id": room_type_id,
+		"instance_id": instance_id,
+		"species_id": species_id,
+	}
+
+
+## Polls every check-in journey still idling at the front desk against its
+## own Room's room["checking_in"] flag -- Sim's flat checkin.delay_ticks
+## countdown (_start_checkin()/_tick_checkins()) is the one and only source
+## of that wait's duration; this loop only notices when it's over; it never
+## re-times it. A Room that's vanished (defensive only) resolves the same as
+## checking_in going false, so a journey can never be stranded waiting on a
+## Room that no longer exists.
+func _poll_waiting_journeys() -> void:
+	for room_key in _active_room_journeys.keys().duplicate():
+		var j: Dictionary = _active_room_journeys[room_key]
+		if j["phase"] != "waiting":
+			continue
+		var room := GameState.room_instance(j["room_type_id"], j["instance_id"])
+		if room.is_empty() or not room.get("checking_in", false):
+			_begin_checkin_ride(room_key, j)
+
+
+## The walk-to-shaft / ride / walk-to-room leg of a check-in journey, played
+## once Sim's own check-in delay has resolved (see _poll_waiting_journeys()).
+func _begin_checkin_ride(room_key: String, j: Dictionary) -> void:
+	j["phase"] = "moving"
+	var actor: CharacterSprite = j["actor"]
+	actor.configure(BuildingLayout.resolve_character_sprite("guest", j["species_id"], "walk"))
+
+	var floors := BuildingLayout.floors(GameState.rooms, GameState.stars)
+	var room_floor_index := BuildingLayout.floor_index_for_room_type(floors, j["room_type_id"])
+	if room_floor_index == -1: # defensive only -- every caller sources room_type_id from a live GameState.hotel_rooms entry
+		_cancel_journey(room_key)
+		return
+
+	var reception_door: Vector2 = BuildingLayout.resolve_anchor(floors, 0, "elevator_door")
+	var room_door: Vector2 = BuildingLayout.resolve_anchor(floors, room_floor_index, "elevator_door")
+	var destination: Vector2 = BuildingLayout.resolve_room_occupant_point(floors, room_floor_index, j["instance_id"], 0)
+
+	_play_ride_legs(j, reception_door, room_door, destination, room_floor_index, _finish_checkin_journey.bind(room_key))
+
+
+## The walk/ride/walk leg sequence shared by both directions of the elevator
+## journey (check-in's front-desk-to-Room and checkout's Room-to-lobby-exit)
+## -- three chained tween_property() calls, sequential by default (no
+## set_parallel(true), unlike _pan_by()'s camera tween elsewhere in this
+## file), with the riding-only car decoration attached/detached around the
+## middle leg. `j["tween"]` is stored so _cancel_journey()/_rebuild_building()
+## can kill it if the journey needs to be torn down mid-flight.
+func _play_ride_legs(j: Dictionary, leg_a: Vector2, leg_b: Vector2, leg_c: Vector2, floors_traveled: int, finish_cb: Callable) -> void:
+	var actor: CharacterSprite = j["actor"]
+	var ride_duration := _ride_duration(floors_traveled)
+
+	var tween := create_tween()
+	j["tween"] = tween
+	tween.tween_property(actor, "position", leg_a, JOURNEY_WALK_DURATION)
+	tween.tween_callback(_attach_elevator_car.bind(actor))
+	tween.tween_property(actor, "position", leg_b, ride_duration)
+	tween.tween_callback(_detach_elevator_car.bind(actor))
+	tween.tween_property(actor, "position", leg_c, JOURNEY_WALK_DURATION)
+	tween.tween_callback(finish_cb)
+
+
+## Arrival: frees the journey's own travelling actor and hands the Room back
+## to the ordinary occupant render pass -- forced immediately (rather than
+## waiting for the next signature-driven rebuild) so there's no one-frame gap
+## with no guest visible at all.
+func _finish_checkin_journey(room_key: String) -> void:
+	var j: Dictionary = _active_room_journeys.get(room_key, {})
+	if j.is_empty():
+		return
+	if j.get("actor") != null:
+		j["actor"].queue_free()
+	_active_room_journeys.erase(room_key)
+	_rebuild_room_bays(BuildingLayout.floors(GameState.rooms, GameState.stars))
+
+
+## Checkout's journey is the exact reverse of check-in's ride/walk legs, with
+## no "waiting" phase of its own -- unlike admission, Sim.checkout has no
+## flat delay to poll for, so the walk-out starts the instant this fires.
+## EventBus.guest_checked_out is emitted BEFORE Sim clears the Room's own
+## occupant fields (sim_controller.gd's _checkout_guest()), so this handler
+## runs while GameState.room_instance() still reports the departing guest --
+## claiming room_key into _active_room_journeys here, before this node's own
+## next _process() rebuild, is what keeps the ordinary occupant render pass
+## from drawing that same guest a second time already leaving.
+func _on_guest_checked_out(_guest_name: String, species_id: String, room_type_id: String, instance_id: int) -> void:
+	var room_key := _room_key(room_type_id, instance_id)
+	_cancel_journey(room_key) # defensive: an in-flight check-in for this Room shouldn't collide with its checkout (can't happen today -- see _on_guest_seated()'s matching comment)
+
+	var floors := BuildingLayout.floors(GameState.rooms, GameState.stars)
+	var room_floor_index := BuildingLayout.floor_index_for_room_type(floors, room_type_id)
+	if room_floor_index == -1: # defensive only, mirrors _begin_checkin_ride()'s own guard
+		return
+
+	var actor := CharacterSprite.new()
+	_building.add_child(actor)
+	actor.configure(BuildingLayout.resolve_character_sprite("guest", species_id, "walk"))
+	actor.position = BuildingLayout.resolve_room_occupant_point(floors, room_floor_index, instance_id, 0)
+
+	var j := _new_journey("moving", actor, room_type_id, instance_id, species_id)
+	_active_room_journeys[room_key] = j
+
+	var room_door: Vector2 = BuildingLayout.resolve_anchor(floors, room_floor_index, "elevator_door")
+	var reception_door: Vector2 = BuildingLayout.resolve_anchor(floors, 0, "elevator_door")
+	var exit_point := _lobby_exit_point(floors)
+
+	_play_ride_legs(j, room_door, reception_door, exit_point, room_floor_index, _finish_checkout_journey.bind(room_key))
+
+
+func _finish_checkout_journey(room_key: String) -> void:
+	var j: Dictionary = _active_room_journeys.get(room_key, {})
+	if j.is_empty():
+		return
+	if j.get("actor") != null:
+		j["actor"].queue_free()
+	_active_room_journeys.erase(room_key)
+
+
+## A turned-away Party's own lobby actors (every "<party_id>:<member_index>"
+## key in _lobby_guest_actors, per ADR-... spec.md story 14's "a Party of
+## three is three characters") walk back out through the lobby together, no
+## elevator involved -- ticket 09/10's Terrace/lobby have their own separate
+## queues, but a Room-booking Party never touches the elevator until it's
+## actually seated. Relies on the same connection-order guarantee
+## _ready()'s own comment documents: Sim's pending_arrivals.erase() already
+## happened by the time this runs, but this node's own next _process()
+## rebuild (which would free these same actors) hasn't yet -- so their
+## current positions are still the Party's real, live queue spots, not a
+## fixed stand-in.
+func _on_guest_turned_away(_guest_name: String, species_id: String, _reason: String, party_id: int) -> void:
+	var floors := BuildingLayout.floors(GameState.rooms, GameState.stars)
+	var exit_point := _lobby_exit_point(floors)
+	var prefix := "%d:" % party_id
+	for key in _lobby_guest_actors.keys():
+		if not key.begins_with(prefix):
+			continue
+		_spawn_turn_away_ghost(_lobby_guest_actors[key].position, species_id, exit_point)
+
+
+func _spawn_turn_away_ghost(start: Vector2, species_id: String, exit_point: Vector2) -> void:
+	var actor := CharacterSprite.new()
+	_building.add_child(actor)
+	actor.configure(BuildingLayout.resolve_character_sprite("guest", species_id, "walk"))
+	actor.position = start
+
+	var tween := create_tween()
+	tween.tween_property(actor, "position", exit_point, JOURNEY_TURN_AWAY_DURATION)
+	tween.tween_callback(actor.queue_free)
+
+
+## Kills room_key's in-flight journey (if any) and frees its travelling
+## actor immediately, with no completion side effects -- used defensively
+## where a fresh journey is about to claim a Room a stale one might still
+## (impossibly, today) hold onto. Not used for the ordinary "arrived" case;
+## that's _finish_checkin_journey()/_finish_checkout_journey().
+func _cancel_journey(room_key: String) -> void:
+	var j: Dictionary = _active_room_journeys.get(room_key, {})
+	if j.is_empty():
+		return
+	if j.get("tween") != null and j["tween"].is_valid():
+		j["tween"].kill()
+	if j.get("actor") != null:
+		j["actor"].queue_free()
+	_active_room_journeys.erase(room_key)
+
+
+## The ride leg's duration, scaled a little by floor distance so a top-floor
+## trip reads as further than a Terrace-level hop -- see
+## JOURNEY_RIDE_DURATION_PER_FLOOR's comment.
+func _ride_duration(room_floor_index: int) -> float:
+	return clampf(float(room_floor_index) * JOURNEY_RIDE_DURATION_PER_FLOOR, JOURNEY_RIDE_DURATION_MIN, JOURNEY_RIDE_DURATION_MAX)
+
+
+## Reception's front_desk anchor, offset to the left of the building's own
+## x=0 edge -- see LOBBY_EXIT_LOCAL_X's comment.
+func _lobby_exit_point(floors: Array) -> Vector2:
+	var front_desk: Vector2 = BuildingLayout.resolve_anchor(floors, 0, "front_desk")
+	return Vector2(LOBBY_EXIT_LOCAL_X, front_desk.y)
+
+
+## Attaches/removes the riding-only car decoration (ELEVATOR_CAR_SIZE/
+## ELEVATOR_CAR_COLOR) as a child of the travelling actor, so it moves with
+## the actor for free during the shaft-transit leg only -- see the
+## constant's own header comment for why this is simpler than a shared,
+## persistent car node.
+func _attach_elevator_car(actor: CharacterSprite) -> void:
+	var car := ColorRect.new()
+	car.name = "ElevatorCar"
+	car.color = ELEVATOR_CAR_COLOR
+	car.size = ELEVATOR_CAR_SIZE
+	car.position = Vector2(-ELEVATOR_CAR_SIZE.x / 2.0, -ELEVATOR_CAR_SIZE.y)
+	car.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	car.z_index = -1
+	actor.add_child(car)
+
+
+func _detach_elevator_car(actor: CharacterSprite) -> void:
+	var car := actor.get_node_or_null("ElevatorCar")
+	if car != null:
+		car.queue_free()
 
 
 ## --- Staffer tap/drag (ticket 07) ---
