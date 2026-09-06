@@ -119,11 +119,14 @@ const AUTO_PAN_SPEED := 500.0
 ## a little with floor distance so a top-floor trip reads as further than a
 ## Terrace-level hop, clamped so neither a same-floor edge case nor a very
 ## tall building produces a silly duration.
-const JOURNEY_WALK_DURATION := 0.5
+## Walk legs are slow enough that a walk-cycle sheet's frame-to-frame
+## differences (subtle -- a few pixels of leg articulation) actually get
+## time on screen instead of blurring past in under a second.
+const JOURNEY_WALK_DURATION := 1.4
 const JOURNEY_RIDE_DURATION_PER_FLOOR := 0.3
 const JOURNEY_RIDE_DURATION_MIN := 0.3
 const JOURNEY_RIDE_DURATION_MAX := 1.5
-const JOURNEY_TURN_AWAY_DURATION := 0.8
+const JOURNEY_TURN_AWAY_DURATION := 1.6
 
 ## A small riding-only decoration parented to the travelling actor for the
 ## shaft-transit leg only (added/removed by _attach_elevator_car()/
@@ -605,9 +608,10 @@ func _rebuild_station_posts(floors: Array) -> void:
 ## nook if not (sim/building_layout.gd's staffer_placements(), ticket 07)
 ## -- replaces ticket 06's hardcoded _spawn_manny() with the same
 ## resolve_character_sprite("staffer", id, ...) path for every Staffer,
-## Manny included: he has no idle sheet, so he now renders his placeholder
-## like anyone else's rest state would, rather than being special-cased
-## into his walk-cycle demo. Ticket 13: a Staffer currently tracked in
+## Manny included -- his rest state now runs through ui/idle_animator.gd's
+## still-plus-occasional-clip behaviour like anyone else's, rather than
+## being special-cased into his walk-cycle demo. Ticket 13: a Staffer
+## currently tracked in
 ## _staffer_travel (a Housekeeping Staffer mid-Job, travelling to or
 ## working at their actual Room) is skipped here entirely -- that dict
 ## owns their visible actor instead, so this pass would otherwise draw them
@@ -1001,13 +1005,19 @@ func _begin_checkin_ride(room_key: String, j: Dictionary) -> void:
 func _play_ride_legs(j: Dictionary, leg_a: Vector2, leg_b: Vector2, leg_c: Vector2, floors_traveled: int, finish_cb: Callable) -> void:
 	var actor: CharacterSprite = j["actor"]
 	var ride_duration := _ride_duration(floors_traveled)
+	var start_position: Vector2 = actor.position
 
 	var tween := create_tween()
 	j["tween"] = tween
+	## The ride leg (elevator_door -> elevator_door) never moves horizontally
+	## -- same shaft x on every floor -- so facing is only ever (re)set before
+	## a walking leg, once per direction change, and holds through the ride.
+	tween.tween_callback(actor.set_flip_h.bind(leg_a.x < start_position.x))
 	tween.tween_property(actor, "position", leg_a, JOURNEY_WALK_DURATION)
 	tween.tween_callback(_attach_elevator_car.bind(actor))
 	tween.tween_property(actor, "position", leg_b, ride_duration)
 	tween.tween_callback(_detach_elevator_car.bind(actor))
+	tween.tween_callback(actor.set_flip_h.bind(leg_c.x < leg_b.x))
 	tween.tween_property(actor, "position", leg_c, JOURNEY_WALK_DURATION)
 	tween.tween_callback(finish_cb)
 
@@ -1094,6 +1104,7 @@ func _spawn_turn_away_ghost(start: Vector2, species_id: String, exit_point: Vect
 	_building.add_child(actor)
 	actor.configure(BuildingLayout.resolve_character_sprite("guest", species_id, "walk"))
 	actor.position = start
+	actor.set_flip_h(exit_point.x < start.x)
 
 	var tween := create_tween()
 	tween.tween_property(actor, "position", exit_point, JOURNEY_TURN_AWAY_DURATION)

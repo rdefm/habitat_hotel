@@ -9,14 +9,20 @@ extends Node2D
 ## showing the guest's "idle" state by day and "sleeping" at Night (spec.md
 ## story 25), with a small "Zz" label standing in for a sleeping animation
 ## no asset carries yet -- disappears the moment a real "sleeping" sheet
-## lands, same as every other placeholder-era label in this contract.
+## lands, same as every other placeholder-era label in this contract. By
+## day, "idle" runs through ui/idle_animator.gd -- a plain still with an
+## occasional random idle-animation clip for whichever Species has one --
+## deactivated at Night so the timer can't fire mid-sleep and stomp the
+## sleeping frame with an idle clip.
 
 const CharacterSprite = preload("res://ui/character_sprite.gd")
 const BuildingLayout = preload("res://sim/building_layout.gd")
+const IdleAnimator = preload("res://ui/idle_animator.gd")
 
 const ZZ_OFFSET := Vector2(6.0, -BuildingLayout.CHARACTER_FRAME_SIZE - 6.0)
 
 var _sprite: CharacterSprite
+var _idle_animator: IdleAnimator
 var _zz: Label = null
 
 
@@ -24,7 +30,14 @@ func configure(species_id: String, sleeping: bool) -> void:
 	if _sprite == null:
 		_sprite = CharacterSprite.new()
 		add_child(_sprite)
-	_sprite.configure(BuildingLayout.resolve_character_sprite("guest", species_id, "sleeping" if sleeping else "idle"))
+		_idle_animator = IdleAnimator.new(_sprite)
+		add_child(_idle_animator)
+
+	if sleeping:
+		_idle_animator.deactivate()
+		_sprite.configure(BuildingLayout.resolve_character_sprite("guest", species_id, "sleeping"))
+	else:
+		_idle_animator.configure("guest", species_id)
 
 	if sleeping and _zz == null:
 		_zz = Label.new()

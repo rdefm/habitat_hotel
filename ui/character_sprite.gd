@@ -20,7 +20,11 @@ extends Node2D
 ## "sprite" dict with no frame size at all, since there's only ever one
 ## frame to show. _add_sprite()/_add_static_sprite() are that split.
 
-func configure(resolved: Dictionary, fps: float = 8.0) -> void:
+## `loop`/`on_finished` (ui/idle_animator.gd's own use) let a caller play a
+## sheet once instead of looping forever, and get notified when it ends --
+## every other caller leaves both at their loop-forever, no-callback
+## defaults, unchanged from before this pair of params existed.
+func configure(resolved: Dictionary, fps: float = 8.0, loop: bool = true, on_finished: Callable = Callable()) -> void:
 	for child in get_children():
 		child.queue_free()
 
@@ -28,12 +32,12 @@ func configure(resolved: Dictionary, fps: float = 8.0) -> void:
 	if resolved["kind"] != "sprite":
 		_add_placeholder(resolved, size)
 	elif resolved.has("frame_width"):
-		_add_sprite(resolved, size, fps)
+		_add_sprite(resolved, size, fps, loop, on_finished)
 	else:
 		_add_static_sprite(resolved, size)
 
 
-func _add_sprite(resolved: Dictionary, size: Vector2, fps: float) -> void:
+func _add_sprite(resolved: Dictionary, size: Vector2, fps: float, loop: bool = true, on_finished: Callable = Callable()) -> void:
 	var texture: Texture2D = load(String(resolved["file"]))
 	var frame_width: float = float(resolved["frame_width"])
 	var frame_height: float = float(resolved["frame_height"])
@@ -42,7 +46,7 @@ func _add_sprite(resolved: Dictionary, size: Vector2, fps: float) -> void:
 
 	var frames := SpriteFrames.new()
 	frames.add_animation("play")
-	frames.set_animation_loop("play", true)
+	frames.set_animation_loop("play", loop)
 	frames.set_animation_speed("play", fps)
 	for row in range(rows):
 		for col in range(columns):
@@ -57,6 +61,8 @@ func _add_sprite(resolved: Dictionary, size: Vector2, fps: float) -> void:
 	sprite.position = Vector2(0, -size.y / 2.0)
 	sprite.scale = Vector2(size.x / frame_width, size.y / frame_height)
 	add_child(sprite)
+	if not loop and on_finished.is_valid():
+		sprite.animation_finished.connect(on_finished)
 	sprite.play("play")
 
 
@@ -73,6 +79,17 @@ func _add_static_sprite(resolved: Dictionary, size: Vector2) -> void:
 	if texture != null and texture.get_width() > 0 and texture.get_height() > 0:
 		sprite.scale = Vector2(size.x / texture.get_width(), size.y / texture.get_height())
 	add_child(sprite)
+
+
+## Sets the current sprite's horizontal facing -- true mirrors it to face
+## left (ui/hotel_world.gd's elevator/Job-travel legs call this once per
+## direction change, based on which way a leg's own start/end x differ, so
+## a character visibly turns to face the way it's walking). No effect on a
+## placeholder -- a plain tinted rect reads the same either way.
+func set_flip_h(flipped: bool) -> void:
+	for child in get_children():
+		if child is AnimatedSprite2D or child is Sprite2D:
+			child.flip_h = flipped
 
 
 func _add_placeholder(resolved: Dictionary, size: Vector2) -> void:

@@ -579,19 +579,36 @@ const CHARACTER_STATES := {
 	"staffer": ["idle", "walk", "working"],
 }
 
-## One-time alias for Manny's existing walk/sweep sheets (ticket 02),
-## named and sized before this contract existed, so they can't follow the
+## One-time alias for Manny's existing walk/sweep/idle-still art, named and
+## sized before this contract existed, so they can't follow the
 ## "<kind>s/<id>_<state>.png" convention every other character gets for
-## free. No "idle" entry -- Manny has no idle sheet, so that state falls
-## through to the placeholder like any other character's would. This is
-## the ticket's own proof that a real asset loads through the exact same
-## resolver as a placeholder does, no special-cased rendering path.
+## free. This is the ticket's own proof that a real asset loads through the
+## exact same resolver as a placeholder does, no special-cased rendering
+## path.
 const CHARACTER_SPRITE_FILE := {
 	"staffer": {
 		"manny": {
+			"idle": {"file": "res://assets/manny.png", "frame_width": 76.0, "frame_height": 76.0},
 			"walk": {"file": "res://assets/Manny-walk.png", "frame_width": 256.0, "frame_height": 256.0},
 			"working": {"file": "res://assets/Manny-sweeping.png", "frame_width": 256.0, "frame_height": 256.0},
 		},
+	},
+}
+
+## One-time alias, same reasoning as CHARACTER_SPRITE_FILE above, for
+## Manny's own ambient idle-animation clip (resolve_character_idle_clips()
+## below) -- his 82x82 frame size doesn't fit the 64x64 convention any more
+## than his walk/working sheets do. Every other character's clips are pure
+## convention-slot, keyed "<id>_idle_<n>.png"; a character with no entry
+## here and no such file on disk simply never animates while idle -- it
+## just stands on its plain "idle" still forever, which is why e.g. penguin
+## (a still and a walk cycle, but no idle clip yet) is a legitimate,
+## permanent case rather than a gap to fill.
+const CHARACTER_IDLE_CLIP_FILE := {
+	"staffer": {
+		"manny": [
+			{"file": "res://assets/manny-idle.png", "frame_width": 82.0, "frame_height": 82.0},
+		],
 	},
 }
 
@@ -651,6 +668,35 @@ static func _probe_character_sheet_size(path: String):
 	if texture == null:
 		return null
 	return Vector2(texture.get_width(), texture.get_height())
+
+
+## Ambient idle-animation clips for a character slot (ui/idle_animator.gd's
+## "still by default, occasional random clip" behaviour): every clip
+## available for `kind`/`character_id`, checked in the same two-step order
+## as resolve_character_sprite() -- CHARACTER_IDLE_CLIP_FILE's one-time
+## alias (Manny only today) if present, else the open numbered convention
+## "<kind>s/<id>_idle_<n>.png" for n = 1, 2, … probed in order until one is
+## missing. Returns an empty Array (never a placeholder -- there is nothing
+## to draw in place of a clip that doesn't exist, the still just plays
+## alone) when no clip exists at all.
+static func resolve_character_idle_clips(kind: String, character_id: String, probe_fn: Callable = Callable()) -> Array:
+	var alias: Array = CHARACTER_IDLE_CLIP_FILE.get(kind, {}).get(character_id, [])
+	if not alias.is_empty():
+		var aliased: Array = []
+		for clip in alias:
+			aliased.append(_character_sprite_result(String(clip["file"]), float(clip["frame_width"]), float(clip["frame_height"])))
+		return aliased
+
+	var clips: Array = []
+	var n := 1
+	while true:
+		var conventional_path := "%s%ss/%s_idle_%d.png" % [CHARACTER_DIR, kind, character_id, n]
+		var sheet_size = probe_fn.call(conventional_path) if probe_fn.is_valid() else _probe_character_sheet_size(conventional_path)
+		if sheet_size == null:
+			break
+		clips.append(_character_sprite_result(conventional_path, CHARACTER_FRAME_SIZE, CHARACTER_FRAME_SIZE))
+		n += 1
+	return clips
 
 
 ## Deterministic hash-derived tint for any id this contract has never heard

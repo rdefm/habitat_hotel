@@ -29,13 +29,22 @@ func test_manny_working_resolves_to_his_sweeping_sheet() -> void:
 	assert_eq(sprite["file"], "res://assets/Manny-sweeping.png")
 
 
-func test_manny_idle_has_no_alias_and_falls_back_to_a_placeholder() -> void:
-	## Manny has no idle sheet -- proves the alias table and the fallback
-	## share one resolver rather than Manny being special-cased end to end.
+func test_manny_idle_resolves_to_his_real_still_alias() -> void:
 	var sprite := BuildingLayout.resolve_character_sprite("staffer", "manny", "idle")
 
-	assert_eq(sprite["kind"], "placeholder")
-	assert_eq(sprite["label"], "MAN")
+	assert_eq(sprite["kind"], "sprite")
+	assert_eq(sprite["file"], "res://assets/manny.png")
+	assert_eq(sprite["frame_width"], 76.0)
+	assert_eq(sprite["frame_height"], 76.0)
+
+
+func test_manny_has_one_aliased_ambient_idle_clip() -> void:
+	var clips := BuildingLayout.resolve_character_idle_clips("staffer", "manny")
+
+	assert_eq(clips.size(), 1)
+	assert_eq(clips[0]["file"], "res://assets/manny-idle.png")
+	assert_eq(clips[0]["frame_width"], 82.0)
+	assert_eq(clips[0]["frame_height"], 82.0)
 
 
 func test_the_alias_table_takes_priority_over_the_naming_convention() -> void:
@@ -84,14 +93,98 @@ func test_a_species_with_no_sheet_anywhere_falls_back_to_a_tinted_labelled_place
 	assert_eq(sprite["size"], Vector2(BuildingLayout.CHARACTER_FRAME_SIZE, BuildingLayout.CHARACTER_FRAME_SIZE))
 
 
-func test_every_species_falls_back_cleanly_with_no_probe_touching_the_real_filesystem() -> void:
-	## Proof the fallback holds across the whole current roster, not just
-	## one hand-picked id -- real filesystem probe, no such files exist yet.
-	var species_ids := ["pigeon", "capybara", "tortoise", "penguin", "flamingo", "bat", "polar_bear", "snow_leopard"]
+func test_species_with_no_real_art_still_fall_back_cleanly_against_the_real_filesystem() -> void:
+	## Proof the fallback still holds for the rest of the roster -- real
+	## filesystem probe, no such files exist for these five.
+	var species_ids := ["capybara", "flamingo", "bat", "polar_bear", "snow_leopard"]
 	for species_id in species_ids:
 		for state in BuildingLayout.CHARACTER_STATES["guest"]:
 			var sprite := BuildingLayout.resolve_character_sprite("guest", species_id, state)
 			assert_eq(sprite["kind"], "placeholder", "%s/%s should still be on the fallback" % [species_id, state])
+
+
+func test_pigeon_and_penguin_resolve_their_real_idle_and_walk_art() -> void:
+	## These two are cut to the convention -- real filesystem probe,
+	## proving the open convention slot works with no injected probe.
+	for species_id in ["pigeon", "penguin"]:
+		for state in ["idle", "walk"]:
+			var sprite := BuildingLayout.resolve_character_sprite("guest", species_id, state)
+			assert_eq(sprite["kind"], "sprite", "%s/%s should now resolve to real art" % [species_id, state])
+		var sleeping := BuildingLayout.resolve_character_sprite("guest", species_id, "sleeping")
+		assert_eq(sleeping["kind"], "placeholder", "%s has no sleeping art yet" % species_id)
+
+
+func test_shelly_resolves_her_real_idle_and_walk_art_against_the_real_filesystem() -> void:
+	## Shelly (Staffer) carries the tortoise-themed art at her own
+	## convention slot -- moved here from the tortoise Species' guest slot,
+	## which now falls back like any other unpainted Species (see the
+	## fallback test below).
+	for state in ["idle", "walk"]:
+		var sprite := BuildingLayout.resolve_character_sprite("staffer", "shelly", state)
+		assert_eq(sprite["kind"], "sprite", "shelly/%s should resolve to real art" % state)
+	var working := BuildingLayout.resolve_character_sprite("staffer", "shelly", "working")
+	assert_eq(working["kind"], "placeholder", "shelly has no working art")
+
+
+func test_tortoise_species_now_falls_back_since_its_art_moved_to_shelly() -> void:
+	for state in BuildingLayout.CHARACTER_STATES["guest"]:
+		var sprite := BuildingLayout.resolve_character_sprite("guest", "tortoise", state)
+		assert_eq(sprite["kind"], "placeholder", "tortoise/%s should be on the fallback now that its art belongs to Shelly" % state)
+
+
+## --- resolve_character_idle_clips(): ambient idle animation ---
+
+func test_a_species_with_two_numbered_idle_clips_resolves_both_in_order() -> void:
+	var clips := BuildingLayout.resolve_character_idle_clips("guest", "pigeon")
+
+	assert_eq(clips.size(), 2)
+	assert_eq(clips[0]["file"], "res://assets/characters/guests/pigeon_idle_1.png")
+	assert_eq(clips[1]["file"], "res://assets/characters/guests/pigeon_idle_2.png")
+
+
+func test_a_staffer_with_one_numbered_idle_clip_resolves_just_that_one() -> void:
+	## Shelly's tortoise-themed art carries the one idle clip that used to
+	## sit on the tortoise Species' guest slot.
+	var clips := BuildingLayout.resolve_character_idle_clips("staffer", "shelly")
+
+	assert_eq(clips.size(), 1)
+	assert_eq(clips[0]["file"], "res://assets/characters/staffers/shelly_idle_1.png")
+
+
+func test_tortoise_species_has_no_idle_clips_now_that_its_art_moved_to_shelly() -> void:
+	var clips := BuildingLayout.resolve_character_idle_clips("guest", "tortoise")
+
+	assert_true(clips.is_empty())
+
+
+func test_a_species_with_a_still_and_a_walk_but_no_idle_clip_resolves_none() -> void:
+	## Penguin proves a missing clip is a legitimate permanent case, not a
+	## gap -- it still has real idle/walk art, just nothing to animate to.
+	var clips := BuildingLayout.resolve_character_idle_clips("guest", "penguin")
+
+	assert_true(clips.is_empty())
+
+
+func test_a_species_with_no_art_at_all_resolves_no_idle_clips() -> void:
+	var clips := BuildingLayout.resolve_character_idle_clips("guest", "capybara")
+
+	assert_true(clips.is_empty())
+
+
+func test_idle_clip_numbering_stops_at_the_first_gap() -> void:
+	var probe := func(path: String):
+		if path == "res://assets/characters/guests/flamingo_idle_1.png":
+			return Vector2(512, 64)
+		if path == "res://assets/characters/guests/flamingo_idle_2.png":
+			return null
+		if path == "res://assets/characters/guests/flamingo_idle_3.png":
+			return Vector2(512, 64) # would only be found by a buggy resolver that doesn't stop at the gap
+		return null
+
+	var clips := BuildingLayout.resolve_character_idle_clips("guest", "flamingo", probe)
+
+	assert_eq(clips.size(), 1)
+	assert_eq(clips[0]["file"], "res://assets/characters/guests/flamingo_idle_1.png")
 
 
 ## --- Placeholder tint/label helpers ---

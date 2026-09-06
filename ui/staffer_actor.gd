@@ -7,10 +7,11 @@ extends Node2D
 ## idle at rest or working while a Kitchen Job keeps them at their own post
 ## (ticket 13 -- a Housekeeping Staffer's own working state renders on the
 ## separate travelling actor ui/hotel_world.gd's Job travel owns instead,
-## since that Staffer has left this placement entirely). Manny has no idle
-## sheet, so he renders his placeholder for that state like anyone else's
-## rest state would, rather than the walk-cycle demo ticket 06 hardcoded for
-## him.
+## since that Staffer has left this placement entirely). The "idle" state
+## runs through ui/idle_animator.gd -- a plain still, with an occasional
+## random idle-animation clip for whichever Staffer has one (Manny today,
+## via his own alias) -- deactivated whenever "working" takes over so the
+## timer can't fire mid-Job and stomp that state with an idle clip.
 ##
 ## ui/hotel_world.gd owns tap/drag hit-testing against hit_rect() below and
 ## the actual Sim.assign_staffer()/Sim.stack_staffer_on_*() calls a
@@ -19,12 +20,14 @@ extends Node2D
 
 const CharacterSprite = preload("res://ui/character_sprite.gd")
 const BuildingLayout = preload("res://sim/building_layout.gd")
+const IdleAnimator = preload("res://ui/idle_animator.gd")
 
 const HIT_SIZE := Vector2(BuildingLayout.CHARACTER_FRAME_SIZE, BuildingLayout.CHARACTER_FRAME_SIZE)
 
 var staffer_id: String = ""
 
 var _sprite: CharacterSprite
+var _idle_animator: IdleAnimator
 
 
 func configure(new_staffer_id: String, state: String = "idle") -> void:
@@ -32,7 +35,14 @@ func configure(new_staffer_id: String, state: String = "idle") -> void:
 	if _sprite == null:
 		_sprite = CharacterSprite.new()
 		add_child(_sprite)
-	_sprite.configure(BuildingLayout.resolve_character_sprite("staffer", staffer_id, state))
+		_idle_animator = IdleAnimator.new(_sprite)
+		add_child(_idle_animator)
+
+	if state == "idle":
+		_idle_animator.configure("staffer", staffer_id)
+	else:
+		_idle_animator.deactivate()
+		_sprite.configure(BuildingLayout.resolve_character_sprite("staffer", staffer_id, state))
 
 
 ## World-space hit rect for tap/drag, matching CharacterSprite's own
