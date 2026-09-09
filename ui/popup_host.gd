@@ -3,18 +3,19 @@ extends Control
 
 ## A small, anchored popup component (ADR-0011): distinct from
 ## main_screen.gd's generic full-panel overlay (open_menu()/close_menu()) --
-## no title bar, no shared 640x440 panel chrome, just a compact rounded card
-## sized to whatever content it's given. Matches the prototype's
-## .modal-card style (habitat-hotel-prototype-4.html): white, 12px corner
-## radius, padded. Opening pauses the Clock and closing resumes it, same as
-## the generic overlay -- callers are responsible for any of their own
-## follow-up (e.g. refreshing the hotel panel) since this host has no
+## no title bar, no shared 640x440 panel chrome, just a compact card sized to
+## whatever content it's given. Originally matched the prototype's
+## .modal-card style (habitat-hotel-prototype-4.html: white, 12px corner
+## radius); reskinned to the shared pixel-art theme (ticket 16,
+## ui/pixel_theme.gd) so this card reads as part of the same game as the
+## world it floats over. Opening pauses the Clock and closing resumes it,
+## same as the generic overlay -- callers are responsible for any of their
+## own follow-up (e.g. refreshing the hotel panel) since this host has no
 ## knowledge of game state.
 
-const CARD_COLOR := Color(1, 1, 1)
+const PixelTheme = preload("res://ui/pixel_theme.gd")
+
 const BACKDROP_COLOR := Color(0, 0, 0, 0.4)
-const CARD_CORNER_RADIUS := 12
-const CARD_PADDING := 16
 
 var _card: PanelContainer
 var _content: Control
@@ -34,15 +35,7 @@ func _ready() -> void:
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(center)
 
-	_card = PanelContainer.new()
-	var style := StyleBoxFlat.new()
-	style.bg_color = CARD_COLOR
-	style.set_corner_radius_all(CARD_CORNER_RADIUS)
-	style.content_margin_left = CARD_PADDING
-	style.content_margin_right = CARD_PADDING
-	style.content_margin_top = CARD_PADDING
-	style.content_margin_bottom = CARD_PADDING
-	_card.add_theme_stylebox_override("panel", style)
+	_card = PixelTheme.themed_panel()
 	center.add_child(_card)
 
 

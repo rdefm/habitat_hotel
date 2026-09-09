@@ -20,6 +20,7 @@ const ReceptionPanel = preload("res://ui/reception_panel.gd")
 const StationPanel = preload("res://ui/station_panel.gd")
 const TerracePanel = preload("res://ui/terrace_panel.gd")
 const PopupHost = preload("res://ui/popup_host.gd")
+const PixelTheme = preload("res://ui/pixel_theme.gd")
 const SeatConfirmMenu = preload("res://ui/seat_confirm_menu.gd")
 const StayInfoMenu = preload("res://ui/stay_info_menu.gd")
 const BuildConfirmMenu = preload("res://ui/build_confirm_menu.gd")
@@ -330,7 +331,7 @@ func _build_overlay(parent: Node) -> void:
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_overlay.add_child(center)
 
-	var panel := PanelContainer.new()
+	var panel := PixelTheme.themed_panel()
 	panel.custom_minimum_size = Vector2(640, 440)
 	panel.clip_contents = true
 	center.add_child(panel)
@@ -339,6 +340,7 @@ func _build_overlay(parent: Node) -> void:
 	panel.add_child(vbox)
 
 	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 10)
 	vbox.add_child(header)
 
 	_overlay_title = Label.new()
