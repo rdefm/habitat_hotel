@@ -6,31 +6,25 @@ extends Control
 ## location -- Reception for day-summary/forecast events, the Terrace for
 ## dining events, the specific Room bay for a checkout's review. Lives as a
 ## screen-space overlay in main_screen.gd's HUD CanvasLayer (mouse_filter
-## IGNORE, same reasoning as ui/room_occupancy_layer.gd's class doc: never
-## intercept a tap/drag meant for whatever's beneath it) rather than inside
-## any one panel, so a rebuild elsewhere can't free a toast out from under
-## itself.
+## IGNORE, so it never intercepts a tap/drag meant for hotel_world.gd
+## beneath it) rather than inside the world itself, so a world rebuild can't
+## free a toast out from under itself.
 ##
-## Two coexisting anchor systems, one per main_screen.USE_HOTEL_WORLD mode --
-## spec.md's migration plan only retires "the Control-space parts of
-## toast_layer.gd" (not the whole file) in ticket 17, so both stay wired
-## until then:
-##  - Control mode (`hotel_panel`/`reception_panel` set): the original
-##    ticket-08 behaviour, re-deriving each anchor's on-screen rect from a
-##    live Control every frame (_anchor_position()/_reception_anchor()).
-##  - World mode (`hotel_world` set, ticket 15): an anchor is resolved ONCE,
-##    as a WORLD position (sim/building_layout.gd's anchor registry) rather
-##    than a Control rect -- floors never move once placed (spec.md: "a
-##    newly unlocked Room type stacks on top and never renumbers the floors
-##    below"), so there's nothing to re-derive. What changes every frame is
-##    only the camera, so each frame this projects that fixed world anchor
-##    through HotelWorld.world_to_screen() (ADR-0020: "a toast is a node
-##    parented to its anchor... now a world position projected through the
-##    camera"). When the projected point falls outside the camera's current
-##    framing, every toast at that anchor hides and a single tappable arrow
-##    marker appears clamped to the nearest screen edge, pointing back at the
-##    anchor -- tapping it calls HotelWorld.pan_to_world_point() (spec.md
-##    stories 51/52).
+## World mode only (ticket 17 retired the Control-mode anchor system this
+## file carried during the migration -- see ADR-0020 and
+## .scratch/visual-hotel-world/issues/17-retire-the-old-view.md): an anchor
+## is resolved ONCE, as a WORLD position (sim/building_layout.gd's anchor
+## registry) rather than a Control rect -- floors never move once placed
+## (spec.md: "a newly unlocked Room type stacks on top and never renumbers
+## the floors below"), so there's nothing to re-derive. What changes every
+## frame is only the camera, so each frame this projects that fixed world
+## anchor through HotelWorld.world_to_screen() (ADR-0020: "a toast is a node
+## parented to its anchor... now a world position projected through the
+## camera"). When the projected point falls outside the camera's current
+## framing, every toast at that anchor hides and a single tappable arrow
+## marker appears clamped to the nearest screen edge, pointing back at the
+## anchor -- tapping it calls HotelWorld.pan_to_world_point() (spec.md
+## stories 51/52).
 ##
 ## Toast text carries the same information main_screen.gd's old
 ## _on_day_summary/_on_review_posted/_on_forecast_ready handlers used to
@@ -38,12 +32,10 @@ extends Control
 ## made sense inside the old RichTextLabel (a toast Label colors its whole
 ## line via Color instead of highlighting one colored substring). Ticket 15
 ## adds the Terrace's own dining events (EventBus.dining_guest_served/
-## dining_guest_walked_away), which never had a toast of their own before --
-## no day-log line existed for them either, so nothing regresses in Control
-## mode by wiring them there too. review_posted carries the checkout's
-## room_type_id/instance_id (sim_controller.gd's _checkout_guest()) so its
-## toast can anchor to that Room's live cell/bay instead of falling back to
-## Reception.
+## dining_guest_walked_away), which never had a toast of their own before.
+## review_posted carries the checkout's room_type_id/instance_id
+## (sim_controller.gd's _checkout_guest()) so its toast can anchor to that
+## Room's live cell/bay instead of falling back to Reception.
 ##
 ## Multiple toasts anchored at the same spot (e.g. several checkouts'
 ## reviews landing on the same Room floor, or a day-summary and a forecast
@@ -54,9 +46,6 @@ extends Control
 ## dismissed toast's gap closes up immediately.
 
 const DemandFormat = preload("res://ui/demand_format.gd")
-const HotelPanel = preload("res://ui/hotel_panel.gd")
-const ReceptionPanel = preload("res://ui/reception_panel.gd")
-const TerracePanel = preload("res://ui/terrace_panel.gd")
 const HotelWorld = preload("res://ui/hotel_world.gd")
 const BuildingLayout = preload("res://sim/building_layout.gd")
 const MatchHint = preload("res://sim/match_hint.gd")
@@ -70,41 +59,27 @@ const TERRACE_ANCHOR_KEY := "terrace"
 
 ## How far inside the viewport's visible content (below the HUD strip) an
 ## anchor's projected screen point must stay before it's considered "in
-## framing" -- world mode only. Also the margin an edge marker is clamped
-## inside of, so it never sits flush against the true screen edge.
+## framing". Also the margin an edge marker is clamped inside of, so it
+## never sits flush against the true screen edge.
 const EDGE_MARGIN := 28.0
 const EDGE_MARKER_SIZE := Vector2(32.0, 32.0)
 
-## Set by main_screen before/after this node enters the tree -- read lazily
-## (find_room_cell()/get_global_rect() calls) rather than cached, so a later
-## HotelPanel/ReceptionPanel rebuild is always reflected, matching
-## ui/room_occupancy_layer.gd's own convention. Control mode only.
-var hotel_panel: HotelPanel
-var reception_panel: ReceptionPanel
-## Ticket 15: Control mode's own Terrace anchor, for the dining events that
-## never had a toast before this ticket in either mode -- mirrors
-## reception_panel's role for RECEPTION_ANCHOR_KEY.
-var terrace_panel: TerracePanel
-
-## Set by main_screen for world mode (ticket 15) instead of the two above.
-## Exactly one of this and hotel_panel/reception_panel is set for the
-## lifetime of this node -- main_screen picks one at construction per
-## USE_HOTEL_WORLD, mirroring every other dual-mode view piece in this repo.
+## Set by main_screen before this node enters the tree.
 var hotel_world: HotelWorld
 
 ## anchor_key -> Array[Control], oldest first, packed upward from the anchor
 ## point.
 var _stacks: Dictionary = {}
 
-## World mode only: anchor_key -> Vector2, the anchor's fixed world position,
-## resolved once when its first live toast spawns (see the class doc: a
-## floor's anchors never move once placed, so there's nothing to refresh).
+## anchor_key -> Vector2, the anchor's fixed world position, resolved once
+## when its first live toast spawns (see the class doc: a floor's anchors
+## never move once placed, so there's nothing to refresh).
 var _world_anchor_positions: Dictionary = {}
 
-## World mode only: anchor_key -> Button, the tappable arrow marker shown
-## while that anchor's toasts are all hidden off current framing. Created
-## lazily on first need, hidden (not freed) between uses, and freed only
-## when its whole stack empties (_dismiss()).
+## anchor_key -> Button, the tappable arrow marker shown while that anchor's
+## toasts are all hidden off current framing. Created lazily on first need,
+## hidden (not freed) between uses, and freed only when its whole stack
+## empties (_dismiss()).
 var _edge_markers: Dictionary = {}
 
 
@@ -163,7 +138,7 @@ func _on_forecast_ready(for_day: int, arrivals: Array) -> void:
 
 ## Ticket 15: the Terrace's own dining events never had a toast of their own
 ## before this ticket -- no retired day-log line covered them either, so
-## nothing regresses by adding one now, in both anchor modes alike.
+## nothing regresses by adding one now.
 func _on_dining_guest_served(guest_name: String, species_id: String, review: String, _satisfaction: float) -> void:
 	var color: Color = {"positive": Color(0.6, 1.0, 0.6), "negative": Color(1.0, 0.6, 0.6)}.get(review, Color(0.85, 0.85, 0.85))
 	var species_name: String = GameState.species.get(species_id, {}).get("name", species_id)
@@ -188,8 +163,7 @@ func _spawn(anchor_key: String, text: String, text_color: Color) -> void:
 	stack.append(toast)
 	_stacks[anchor_key] = stack
 
-	if hotel_world != null:
-		_world_anchor_positions[anchor_key] = _resolve_world_anchor(anchor_key)
+	_world_anchor_positions[anchor_key] = _resolve_world_anchor(anchor_key)
 
 	_reposition_stack(anchor_key)
 
@@ -215,36 +189,17 @@ func _dismiss(anchor_key: String, toast: Control) -> void:
 	toast.queue_free()
 
 
+## Projects the anchor's fixed world position through the camera every frame
+## (HotelWorld.world_to_screen()). When the projected point still falls
+## within the visible content rect (the viewport, minus the HUD strip and
+## EDGE_MARGIN on every side), every toast in the stack renders normally,
+## packed upward from that screen point. Otherwise every toast hides and a
+## single arrow marker appears clamped to the nearest edge of that same
+## rect, rotated to point back at the true anchor.
 func _reposition_stack(anchor_key: String) -> void:
 	var stack: Array = _stacks.get(anchor_key, [])
 	if stack.is_empty():
 		return
-	if hotel_world != null:
-		_reposition_stack_world(anchor_key, stack)
-	else:
-		_reposition_stack_control(anchor_key, stack)
-
-
-func _reposition_stack_control(anchor_key: String, stack: Array) -> void:
-	var anchor := _anchor_position(anchor_key)
-	var y := anchor.y
-	for toast in stack:
-		if not is_instance_valid(toast):
-			continue
-		toast.visible = true
-		y -= toast.size.y + TOAST_GAP
-		toast.position = Vector2(anchor.x - TOAST_WIDTH / 2.0, y)
-
-
-## World mode (ticket 15): projects the anchor's fixed world position through
-## the camera every frame (HotelWorld.world_to_screen()) rather than
-## re-deriving a Control rect. When the projected point still falls within
-## the visible content rect (the viewport, minus the HUD strip and
-## EDGE_MARGIN on every side), every toast in the stack renders normally,
-## packed upward from that screen point exactly like Control mode. Otherwise
-## every toast hides and a single arrow marker appears clamped to the
-## nearest edge of that same rect, rotated to point back at the true anchor.
-func _reposition_stack_world(anchor_key: String, stack: Array) -> void:
 	var world_anchor: Vector2 = _world_anchor_positions.get(anchor_key, Vector2.ZERO)
 	var screen_anchor := hotel_world.world_to_screen(world_anchor)
 	var content_rect := _visible_content_rect().grow(-EDGE_MARGIN)
@@ -273,8 +228,7 @@ func _visible_content_rect() -> Rect2:
 ## --- Anchors ---
 
 ## Reuses MatchHint.room_key()'s own room_type_id+instance_id key format
-## (room_occupancy_layer.gd's _room_key() does the same) rather than
-## inventing a second one -- prefixed so it can't collide with
+## rather than inventing a second one -- prefixed so it can't collide with
 ## RECEPTION_ANCHOR_KEY/TERRACE_ANCHOR_KEY.
 func _room_anchor_key(room_type_id: String, instance_id: int) -> String:
 	if room_type_id == "" or instance_id < 0:
@@ -282,44 +236,15 @@ func _room_anchor_key(room_type_id: String, instance_id: int) -> String:
 	return "room|" + MatchHint.room_key({"room_type_id": room_type_id, "instance_id": instance_id})
 
 
-## Falls back to Reception whenever a Room-cell or Terrace anchor can't be
-## resolved -- the Room's floor hasn't been unlocked-scrolled into view, a
-## HotelPanel.refresh() rebuild hasn't recreated the cell for this frame yet,
-## or terrace_panel was never wired -- so a toast is never simply left
-## un-positioned. Control mode only.
-func _anchor_position(anchor_key: String) -> Vector2:
-	if anchor_key == TERRACE_ANCHOR_KEY and terrace_panel != null:
-		return _to_local(terrace_panel.get_global_rect().get_center())
-	if anchor_key != RECEPTION_ANCHOR_KEY and hotel_panel != null:
-		var room_key := anchor_key.trim_prefix("room|")
-		var parts := room_key.split("#")
-		if parts.size() == 2:
-			var cell := hotel_panel.find_room_cell(parts[0], int(parts[1]))
-			if cell != null:
-				return _to_local(cell.get_global_rect().get_center())
-	return _reception_anchor()
-
-
-func _reception_anchor() -> Vector2:
-	if reception_panel == null:
-		return Vector2.ZERO
-	return _to_local(reception_panel.get_global_rect().get_center())
-
-
-func _to_local(global_pos: Vector2) -> Vector2:
-	return global_pos - global_position
-
-
-## World mode (ticket 15): resolves anchor_key into a WORLD position via
-## sim/building_layout.gd's own anchor registry, the same one hotel_world.gd
-## draws every Station post, Room bay, and the Terrace's signage from -- no
-## anchor math is duplicated here. A Room bay's instance_id doubles as its
-## bay index directly (BuildingLayout.room_bay_states(): a built bay's own
-## instance_id IS its bay index, since bays fill in ascending instance_id
-## order), matching hotel_world.gd's own bay rendering loop. Falls back to
-## Reception's front_desk for a room anchor whose floor can't be resolved
-## (defensive only, mirroring _anchor_position()'s Control-mode fallback) --
-## a toast is never left un-positioned in either mode.
+## Resolves anchor_key into a WORLD position via sim/building_layout.gd's own
+## anchor registry, the same one hotel_world.gd draws every Station post,
+## Room bay, and the Terrace's signage from -- no anchor math is duplicated
+## here. A Room bay's instance_id doubles as its bay index directly
+## (BuildingLayout.room_bay_states(): a built bay's own instance_id IS its
+## bay index, since bays fill in ascending instance_id order), matching
+## hotel_world.gd's own bay rendering loop. Falls back to Reception's
+## front_desk for a room anchor whose floor can't be resolved (defensive
+## only) -- a toast is never left un-positioned.
 func _resolve_world_anchor(anchor_key: String) -> Vector2:
 	var floors := BuildingLayout.floors(GameState.rooms, GameState.stars)
 
@@ -391,8 +316,6 @@ func _make_edge_marker(anchor_key: String) -> Button:
 
 
 func _on_edge_marker_pressed(anchor_key: String) -> void:
-	if hotel_world == null:
-		return
 	hotel_world.pan_to_world_point(_world_anchor_positions.get(anchor_key, Vector2.ZERO))
 
 

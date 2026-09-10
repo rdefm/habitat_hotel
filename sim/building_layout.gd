@@ -239,6 +239,15 @@ const SUPPLY_CLOSET_LOCAL := Vector2(INTERIOR_LEFT + 20.0, 40.0)
 const STAFF_NOOK_LOCAL := Vector2(INTERIOR_LEFT + 100.0, 60.0)
 const LOBBY_QUEUE_ORIGIN := Vector2(INTERIOR_LEFT + 180.0, 150.0)
 
+## Tap target for Reception's own signage (ticket 17, ADR-0010's "tap the
+## structure" gesture) -- the world-mode equivalent of the retired
+## ui/reception_panel.gd's reception_tapped button, opening the same
+## ReceptionMenu (Prices/Hire/Reports/Reviews tabs) unchanged. Same shape and
+## reasoning as TERRACE_SIGNAGE_RECT_LOCAL below: a generous rect over the
+## floor sign's own top-left corner (_add_floor_sign()), past the sign
+## Label's own text bounds so the gesture is forgiving.
+const RECEPTION_SIGNAGE_RECT_LOCAL := Rect2(Vector2(0.0, 0.0), Vector2(180.0, 36.0))
+
 ## Terrace band (height TERRACE_HEIGHT): diner spots are a small grid of
 ## table positions; the entrance queue is a line, same shape as the lobby
 ## queue but its own anchor so the two never collide.
@@ -311,6 +320,8 @@ static func _named_anchor_local(kind: String, name: String, height: float) -> Va
 			return SUPPLY_CLOSET_LOCAL
 		if name == "staff_nook":
 			return STAFF_NOOK_LOCAL
+		if name == "signage":
+			return RECEPTION_SIGNAGE_RECT_LOCAL
 	elif kind == "terrace":
 		if name == "kitchen_pass":
 			return TERRACE_KITCHEN_PASS_LOCAL
@@ -804,6 +815,12 @@ static func _probe_exists(path: String) -> bool:
 ## structure" gesture, opening the existing Terrace menu unchanged.
 static func resolve_terrace_signage_rect(floors_bottom_to_top: Array) -> Rect2:
 	return resolve_anchor(floors_bottom_to_top, TERRACE_LEVEL, "signage")
+
+
+## World-space tap target for Reception's own signage (ticket 17) -- the
+## same "tap the structure" gesture, opening ReceptionMenu.
+static func resolve_reception_signage_rect(floors_bottom_to_top: Array) -> Rect2:
+	return resolve_anchor(floors_bottom_to_top, GROUND_FLOOR_LEVEL, "signage")
 
 
 ## Every Sim.walkin_queue entry (a Walk-in Diner or a Dining Party alike --

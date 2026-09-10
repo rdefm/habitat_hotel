@@ -43,8 +43,8 @@ var stations: Dictionary = {}
 # Kitchen unstaffed (the player assigns someone to run breakfast/dinner
 # service themselves). Manny, Bellhop's old default Staffer, now starts
 # with no Station at all -- the Staff Pool -- which is a state
-# staffer_station() has always modelled as "" and ui/station_panel.gd
-# already renders its own row for.
+# staffer_station() has always modelled as "" and ui/hotel_world.gd
+# already renders its own staff nook for (BuildingLayout.staffer_bucket()).
 const DEFAULT_STATION_ASSIGNMENTS := {
 	"reception": ["biscuit"],
 	"housekeeping": ["shelly"],

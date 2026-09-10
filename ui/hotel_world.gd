@@ -52,7 +52,11 @@ extends Node2D
 ## them busy. Dragging a second Staffer onto an in-progress Job (either
 ## Station) Stacks them via the existing Sim.can_stack_*()/stack_staffer_on_*()
 ## calls, same gesture and validation ADR-0008 already specifies -- no rule
-## duplicated here.
+## duplicated here. Ticket 17 (retiring the old Control-tree view and its
+## development toggle for good) adds Reception's own signage tap target,
+## mirroring the Terrace's terrace_tapped gesture above, so main_screen can
+## still open ReceptionMenu (Prices/Hire/Reports/Reviews) now that
+## ui/reception_panel.gd's own reception_tapped button is gone.
 
 const BuildingLayout = preload("res://sim/building_layout.gd")
 const CharacterSprite = preload("res://ui/character_sprite.gd")
@@ -161,6 +165,12 @@ signal room_slot_tapped(room_type_id: String, instance_id: int)
 ## terrace_tapped signal.
 signal terrace_tapped
 
+## Emitted whenever Reception's own signage is tapped (ticket 17, the same
+## "tap the structure" gesture as terrace_tapped above) so main_screen can
+## open the existing ReceptionMenu (Prices/Hire/Reports/Reviews tabs), same
+## contract as ui/reception_panel.gd's retired reception_tapped signal.
+signal reception_tapped
+
 ## Emitted whenever a seating gesture (a guest tap-then-bay-tap in
 ## _on_press()/_on_release(), or a guest dragged onto a bay via
 ## _attempt_seat_drop()) lands on a valid Match hint (ticket 11,
@@ -225,6 +235,11 @@ var _cached_rooms_signature := ""
 var _terrace_tap_rect: Rect2 = Rect2()
 var _diner_actors: Dictionary = {}
 var _cached_dining_signature := ""
+
+## Ticket 17: Reception's own signage tap target, mirroring
+## _terrace_tap_rect above -- fixed once the shell is built (Reception never
+## moves), so it's set once in rebuild() rather than per-frame.
+var _reception_tap_rect: Rect2 = Rect2()
 
 ## Ticket 10: lobby guest actors ("<party_id>:<member_index>" -> GuestActor),
 ## rebuilt whenever Sim.pending_arrivals changes -- see _process()'s
@@ -345,6 +360,11 @@ var _press_seat_bay_start_world := Vector2.ZERO
 ## exclusive with a Staffer drag, a Room bay press, and camera panning.
 var _press_terrace := false
 var _press_terrace_start_world := Vector2.ZERO
+
+## Ticket 17: same shape as _press_terrace above, for Reception's own
+## signage tap target.
+var _press_reception := false
+var _press_reception_start_world := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -489,6 +509,7 @@ func _rebuild_building() -> void:
 	_cached_stations_signature = str(GameState.stations)
 	_rebuild_room_bays(floors)
 	_terrace_tap_rect = BuildingLayout.resolve_terrace_signage_rect(floors)
+	_reception_tap_rect = BuildingLayout.resolve_reception_signage_rect(floors)
 	_rebuild_diners(floors)
 	_cached_dining_signature = _dining_signature()
 	_rebuild_lobby_guests(floors)
@@ -1722,6 +1743,11 @@ func _on_press(world_pos: Vector2) -> void:
 		_press_terrace_start_world = world_pos
 		return
 
+	if _reception_tap_rect.has_point(world_pos):
+		_press_reception = true
+		_press_reception_start_world = world_pos
+		return
+
 	_dragging = true
 
 
@@ -1744,6 +1770,10 @@ func _on_release(world_pos: Vector2) -> void:
 		if world_pos.distance_to(_press_terrace_start_world) < TAP_MOVEMENT_THRESHOLD:
 			terrace_tapped.emit()
 		_press_terrace = false
+	elif _press_reception:
+		if world_pos.distance_to(_press_reception_start_world) < TAP_MOVEMENT_THRESHOLD:
+			reception_tapped.emit()
+		_press_reception = false
 	else:
 		_dragging = false
 

@@ -201,6 +201,19 @@ func test_reception_only_anchors_do_not_resolve_on_a_room_floor() -> void:
 	assert_null(BuildingLayout.resolve_anchor(floors, 0, "bay_left"), "bay_left belongs to a Room floor's band, not Reception")
 
 
+func test_reception_signage_rect_sits_at_receptions_own_floor_top() -> void:
+	var floors := BuildingLayout.floors(_rooms(), 1)
+	var reception_top: float = BuildingLayout.floor_bottom_y(floors, 0) - float(floors[0]["height"])
+
+	var signage: Rect2 = BuildingLayout.resolve_reception_signage_rect(floors)
+
+	assert_eq(signage.position.y, reception_top, "the signage rect should sit at Reception's own floor top, matching the floor sign's own position")
+
+	var terrace_signage: Rect2 = BuildingLayout.resolve_terrace_signage_rect(floors)
+	assert_ne(signage.position.y, terrace_signage.position.y, "Reception's and the Terrace's own signage rects should sit on different floors")
+	assert_null(BuildingLayout.resolve_anchor(floors, 0, "kitchen_pass"), "kitchen_pass belongs to the Terrace band, not Reception")
+
+
 func test_bay_left_and_bay_right_are_equal_width_rects_that_tile_the_interior() -> void:
 	var floors := BuildingLayout.floors(_rooms(), 1)
 	var room_index := 2 # cozy_nook, star 1, first Room floor above the Terrace

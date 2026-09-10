@@ -3,16 +3,15 @@ extends VBoxContainer
 
 ## The Terrace's modal (ticket 05, ADR-0009/0010): Kitchen Station staffing
 ## -- tap a Staffer card then tap the Kitchen card to (re)assign, the same
-## Sim.assign_staffer() call and interruption semantics
-## ui/station_panel.gd uses for Reception/Housekeeping (ticket 04),
-## via the StafferCard/StationCard widgets moved here off ui/roster_menu.gd
-## -- the Daily Special picker, and the Terrace's own Upgrade list (reusing
+## Sim.assign_staffer() call and interruption semantics the world's own
+## Station posts use for Reception/Housekeeping (ADR-0020, ticket 07) --
+## the Daily Special picker, and the Terrace's own Upgrade list (reusing
 ## UpgradeMenu's purchase-row pattern (tickets 03/13) but addressed by the
 ## Terrace's single fixed structure instead of room_type_id + instance_id).
 ##
 ## The current Daily Special and the breakfast/dinner queues (with
-## Patience) now live ambiently in ui/terrace_panel.gd instead -- this modal
-## only holds the *interactive* pieces.
+## Patience) live ambiently in ui/hotel_world.gd's own Terrace band instead
+## (ADR-0020) -- this modal only holds the *interactive* pieces.
 ##
 ## Opened by tapping the Terrace structure (main_screen._on_terrace_tapped
 ## -> open_menu()), which pauses the Clock like every other generic-overlay
@@ -22,9 +21,16 @@ extends VBoxContainer
 ## Station-to-assign gesture, and now also emits staffer_tapped so
 ## main_screen can layer the bespoke detail popup (ticket 06, ADR-0011) on
 ## top of this modal via PopupHost.
+##
+## The Staffer/Station card builders below (_make_staffer_button()/
+## _make_station_button()) were shared with ui/station_panel.gd via
+## ui/staffer_card.gd/ui/station_card.gd until ticket 17 retired that whole
+## Control-tree view -- this was their only other caller, so their logic
+## moved here rather than surviving as a two-caller-turned-one-caller shared
+## file (ADR-0020's world already reimplements the Reception/Housekeeping
+## half of this gesture on its own Station posts).
 
-const StafferCard = preload("res://ui/staffer_card.gd")
-const StationCard = preload("res://ui/station_card.gd")
+const Station = preload("res://sim/station.gd")
 
 ## Emitted whenever a Staffer card is tapped, selected or not, so
 ## main_screen can open their detail popup.
@@ -91,7 +97,105 @@ func _section_header(text: String) -> Label:
 	return l
 
 
-## --- Kitchen staffing (moved off ui/roster_menu.gd) ---
+## --- Kitchen staffing (moved off ui/roster_menu.gd; ticket 17 inlined the
+## Staffer/Station card builders off the retired ui/staffer_card.gd/
+## ui/station_card.gd -- see the class doc) ---
+
+const CARD_MIN_SIZE := Vector2(120, 100)
+
+## Drag source for a Staffer card. _can_drop_data/_drop_data live on
+## StationCardButton below, which does the actual Sim.assign_staffer()
+## call -- so gui_is_drag_successful() here already reflects a real
+## accept/reject, not just "some control caught it". _dragging guards
+## against reacting to a notification meant for an unrelated drag.
+class StafferCardButton extends Button:
+	var staffer_id: String = ""
+	var _dragging: bool = false
+
+	func _get_drag_data(_at_position: Vector2) -> Variant:
+		_dragging = true
+		var preview := Label.new()
+		preview.text = text
+		preview.modulate = modulate
+		set_drag_preview(preview)
+		return {"type": "staffer", "staffer_id": staffer_id}
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_DRAG_END and _dragging:
+			_dragging = false
+			if not get_viewport().gui_is_drag_successful():
+				_flash_rejected()
+
+	func _flash_rejected() -> void:
+		var base := modulate
+		var tween := create_tween()
+		tween.tween_property(self, "modulate", Color(1.0, 0.3, 0.3), 0.1)
+		tween.tween_property(self, "modulate", base, 0.2)
+
+
+## Accepts a Staffer dropped onto it (see StafferCardButton above) and
+## routes it through the same Sim.assign_staffer()/_on_assigned() pair the
+## tap flow uses, so green/no-op routing is identical for both gestures by
+## construction.
+class StationCardButton extends Button:
+	signal staffer_dropped(staffer_id: String)
+
+	func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
+		return typeof(data) == TYPE_DICTIONARY and data.get("type") == "staffer"
+
+	func _drop_data(_at_position: Vector2, data: Variant) -> void:
+		staffer_dropped.emit(String(data["staffer_id"]))
+
+
+static func _staffer_skill_summary(staffer_id: String) -> String:
+	var skills: Dictionary = GameState.staffers[staffer_id]["skills"]
+	return "R%d H%d K%d" % [
+		int(skills["reception"]), int(skills["housekeeping"]), int(skills["kitchen"]),
+	]
+
+
+static func _staffer_current_label(staffer_id: String) -> String:
+	return Station.LABELS.get(GameState.staffer_station(staffer_id), "(unassigned)")
+
+
+func _make_staffer_button(staffer_id: String, selected: bool) -> Button:
+	var staffer: Dictionary = GameState.staffers[staffer_id]
+	var summary := _staffer_skill_summary(staffer_id)
+	var label := _staffer_current_label(staffer_id)
+
+	var btn := StafferCardButton.new()
+	btn.staffer_id = staffer_id
+	btn.custom_minimum_size = CARD_MIN_SIZE
+	btn.clip_text = true
+	btn.text = "%s%s\n%s\n%s" % ["» " if selected else "", staffer["name"], summary, label]
+	btn.modulate = Color(1.0, 1.0, 0.6) if selected else Color(1, 1, 1)
+	btn.tooltip_text = "%s -- %s -- currently %s" % [staffer["name"], summary, label]
+	btn.pressed.connect(_on_staffer_pressed.bind(staffer_id))
+	return btn
+
+
+func _make_station_button(station_id: String) -> Button:
+	var staffer_ids: Array = GameState.station_staffers(station_id)
+	var names := []
+	for staffer_id in staffer_ids:
+		names.append(String(GameState.staffers.get(staffer_id, {}).get("name", staffer_id)))
+
+	var btn := StationCardButton.new()
+	btn.custom_minimum_size = CARD_MIN_SIZE
+	btn.clip_text = true
+	btn.text = "%s\n%s" % [Station.LABELS[station_id], String("\n").join(names) if not names.is_empty() else "(empty)"]
+	btn.modulate = Color(1.0, 0.75, 0.75) if names.is_empty() else Color(0.85, 1.0, 0.85)
+	btn.disabled = _selected_staffer_id == ""
+	btn.pressed.connect(func():
+		Sim.assign_staffer(_selected_staffer_id, station_id)
+		_on_assigned()
+	)
+	btn.staffer_dropped.connect(func(staffer_id: String):
+		Sim.assign_staffer(staffer_id, station_id)
+		_on_assigned()
+	)
+	return btn
+
 
 func _refresh_kitchen() -> void:
 	for child in _staffer_row.get_children():
@@ -102,9 +206,9 @@ func _refresh_kitchen() -> void:
 	var staffer_ids := GameState.staffers.keys()
 	staffer_ids.sort()
 	for staffer_id in staffer_ids:
-		_staffer_row.add_child(StafferCard.make_button(staffer_id, staffer_id == _selected_staffer_id, _on_staffer_pressed))
+		_staffer_row.add_child(_make_staffer_button(staffer_id, staffer_id == _selected_staffer_id))
 
-	_station_row.add_child(StationCard.make_button("kitchen", _selected_staffer_id, _on_assigned))
+	_station_row.add_child(_make_station_button("kitchen"))
 
 
 func _on_staffer_pressed(staffer_id: String) -> void:

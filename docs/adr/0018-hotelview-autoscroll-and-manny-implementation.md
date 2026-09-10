@@ -1,6 +1,6 @@
 # Auto-scroll during drag; ADR-0015 (Manny) finally implemented
 
-Status: accepted, amends ADR-0016; closes ADR-0015 (previously accepted, never implemented).
+Status: superseded by ADR-0020, whose own status line already noted this: "the still-open half of ADR-0018 (the auto-scroll-during-drag patch, never implemented, is superseded rather than executed)" — ticket 17 then deleted HotelView itself. Closes ADR-0015 (previously accepted, never implemented), which stands: Manny's real animation survived the rewrite, resolved through `sim/building_layout.gd`'s `resolve_character_sprite()` instead of the Control-tree path this ADR originally wired it into (was: accepted, amends ADR-0016; closes ADR-0015).
 
 Playtesting surfaced two real bugs. (1) HotelView's vertical scroll stack (ADR-0016) has no auto-scroll during a Godot GUI drag, so a Party dragged from Reception (bottom of the stack) can never reach a Room floor (top of the stack) once the building overflows the viewport — the drag gesture physically cannot cross out-of-view space, and the same likely applies to Staffer→Station drags once the Station row/Staff Pool scroll off-screen. (2) ADR-0015 (rename Staffer `marlon` to `manny`, give him real sprite animation) was accepted but never actually implemented: `data/staffers.json`, `autoload/game_state.gd`, and every test still say `marlon`/`Marlon`. `assets/Manny-walk.png`/`Manny-sweeping.png` are imported into the project, but no `.gd` file references them — Manny still renders as `ActorStyle.flat_box()` like every other placeholder actor.
 

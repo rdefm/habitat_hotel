@@ -16,13 +16,13 @@ signal day_summary(summary: Dictionary)
 signal review_posted(review: Dictionary)
 signal forecast_ready(for_day: int, arrivals: Array)
 
-## Per-guest lifecycle events, purely for UI animation (ui/room_occupancy_layer.gd) --
-## Sim's authoritative state changes (cash, occupant, etc.) already happened
-## by the time these fire; nothing should treat them as a source of truth.
-## Rooms are identified by room_type_id + instance_id (see ADR-0004), not a
-## flat slot index. guest_turned_away's party_id (ticket 05) lets that
-## overlay look up the Party's still-live Reception queue card for a real
-## start position before reception_panel.gd's next refresh() rebuilds it away.
+## Per-guest lifecycle events, purely for UI animation (ui/hotel_world.gd's
+## check-in/checkout/turn-away journeys) -- Sim's authoritative state changes
+## (cash, occupant, etc.) already happened by the time these fire; nothing
+## should treat them as a source of truth. Rooms are identified by
+## room_type_id + instance_id (see ADR-0004), not a flat slot index.
+## guest_turned_away's party_id (ticket 05) lets the world look up the
+## Party's still-live lobby guest actors for their real walk-out.
 signal guest_seated(name: String, species_id: String, room_type_id: String, instance_id: int, mismatch: bool)
 signal guest_turned_away(name: String, species_id: String, reason: String, party_id: int)
 signal guest_checked_out(name: String, species_id: String, room_type_id: String, instance_id: int)

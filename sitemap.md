@@ -25,15 +25,15 @@ searching the whole tree. See `CONTEXT.md` for domain vocabulary and
 - `batch_runner.gd` — fast-forwards N days with no real-time wait, writes CSV (balancing tool)
 
 **`ui/`** — Godot Control/Node2D views, one file per screen/menu/component. Naming tells you the shape:
-- `main_screen.gd` (+`.tscn`) — top-level screen: top bar, hotel view, toast layer, modal overlay, popup host
-- `hotel_world.gd` — the Node2D building world (camera, portrait viewport) — current renderer (ADR-0020), replacing the older `hotel_view.gd`/`hotel_panel.gd` Control-based stack (still present, being phased out)
+- `main_screen.gd` (+`.tscn`) — top-level screen: HUD strip, the hotel world, toast layer, modal overlay, popup host
+- `hotel_world.gd` — the Node2D building world (camera, portrait viewport) — the game's only play surface (ADR-0020, ticket 17 retired the older Control-based `hotel_view.gd`/`hotel_panel.gd` stack for good)
 - `*_menu.gd` — full-panel modals opened via `main_screen.gd`'s overlay (e.g. `prices_menu`, `reports_menu`, `reviews_menu`, `reception_menu`, `terrace_menu`, `upgrade_menu`, `hire_menu` [stub])
-- `*_panel.gd` — always-visible structures near Reception/Terrace (`reception_panel`, `station_panel`, `terrace_panel`)
 - Bespoke small popups (ADR-0011), via `popup_host.gd`: `build_confirm_menu`, `seat_confirm_menu`, `stay_info_menu`, `staffer_detail_menu`
 - `character_sprite.gd` — generic renderer for one resolved character/interface slot
-- `*_card.gd` — shared card builders (`staffer_card`, `station_card`)
-- `*_layer.gd` — overlay animation layers (`room_occupancy_layer`, `staff_job_travel_layer`, `toast_layer`)
-- `actor_style.gd`, `demand_format.gd` — shared formatting/styling helpers
+- `*_actor.gd` — `hotel_world.gd`'s own world-space actor tokens (`staffer_actor`, `guest_actor`, `diner_actor`, `room_bay_actor`, `room_occupant_actor`)
+- `needs_bubble.gd`, `idle_animator.gd` — small `hotel_world.gd` helpers (a lobby guest's Tag-icon Needs bubble; an actor's idle-clip animation)
+- `toast_layer.gd` — the one surviving screen-space overlay: transient toasts anchored to a world position, projected through `hotel_world.gd`'s camera
+- `demand_format.gd`, `pixel_theme.gd` — shared formatting/styling helpers
 
 **`main.gd`** (+`main.tscn`) — entry point. Interactive mode boots `main_screen.tscn`; `--batch=N` runs headless via `sim/batch_runner.gd` and quits.
 
