@@ -38,6 +38,25 @@ func test_manny_idle_resolves_to_his_real_still_alias() -> void:
 	assert_eq(sprite["frame_height"], 76.0)
 
 
+func test_mannys_walk_and_working_sheets_carry_their_measured_foot_padding() -> void:
+	## Both sheets' actual art sits well short of their 256px frame's bottom
+	## edge -- ui/character_sprite.gd uses this to nudge the sprite down so
+	## Manny stands on the anchor instead of floating above it.
+	var walk := BuildingLayout.resolve_character_sprite("staffer", "manny", "walk")
+	var working := BuildingLayout.resolve_character_sprite("staffer", "manny", "working")
+
+	assert_eq(walk["foot_padding"], 37.0)
+	assert_eq(working["foot_padding"], 31.0)
+
+
+func test_mannys_idle_still_has_no_foot_padding_correction() -> void:
+	## His idle still is already flush with its frame's bottom edge, unlike
+	## the walk/working sheets above.
+	var sprite := BuildingLayout.resolve_character_sprite("staffer", "manny", "idle")
+
+	assert_eq(sprite["foot_padding"], 0.0)
+
+
 func test_manny_has_one_aliased_ambient_idle_clip() -> void:
 	var clips := BuildingLayout.resolve_character_idle_clips("staffer", "manny")
 
@@ -122,6 +141,7 @@ func test_shelly_resolves_her_real_idle_and_walk_art_against_the_real_filesystem
 	for state in ["idle", "walk"]:
 		var sprite := BuildingLayout.resolve_character_sprite("staffer", "shelly", state)
 		assert_eq(sprite["kind"], "sprite", "shelly/%s should resolve to real art" % state)
+		assert_eq(sprite["foot_padding"], 5.0, "shelly/%s's art sits a little short of its own frame's bottom edge" % state)
 	var working := BuildingLayout.resolve_character_sprite("staffer", "shelly", "working")
 	assert_eq(working["kind"], "placeholder", "shelly has no working art")
 

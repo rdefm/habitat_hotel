@@ -36,14 +36,18 @@ var _sprite: CharacterSprite
 var _mood_face: CharacterSprite
 
 
-func configure(new_party_id: int, new_member_index: int, species_id: String) -> void:
+## `state` defaults to "idle" (every settled lobby guest, unchanged); the
+## walk-in arrival journey (ui/hotel_world.gd's _start_arrival_walk()) passes
+## "walk" while this actor is still travelling in from off-screen, then
+## reconfigures back to "idle" the moment it settles into its queue slot.
+func configure(new_party_id: int, new_member_index: int, species_id: String, state: String = "idle") -> void:
 	party_id = new_party_id
 	member_index = new_member_index
 
 	if _sprite == null:
 		_sprite = CharacterSprite.new()
 		add_child(_sprite)
-	_sprite.configure(BuildingLayout.resolve_character_sprite("guest", species_id, "idle"))
+	_sprite.configure(BuildingLayout.resolve_character_sprite("guest", species_id, state))
 
 	if _mood_face == null:
 		_mood_face = CharacterSprite.new()
@@ -53,6 +57,14 @@ func configure(new_party_id: int, new_member_index: int, species_id: String) -> 
 
 func update_mood(patience: float, patience_cfg: Dictionary) -> void:
 	_mood_face.configure(BuildingLayout.resolve_mood_face_for_patience(patience, patience_cfg))
+
+
+## Delegates to the wrapped CharacterSprite's own facing -- the arrival
+## journey's one and only direction change (always walking in from the
+## right, so always flipped to face left), same delegation shape as every
+## other actor wrapper in this file.
+func set_flip_h(flipped: bool) -> void:
+	_sprite.set_flip_h(flipped)
 
 
 ## World-space hit rect for tap, matching CharacterSprite's own footprint

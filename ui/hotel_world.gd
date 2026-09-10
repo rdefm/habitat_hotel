@@ -132,6 +132,21 @@ const JOURNEY_RIDE_DURATION_MIN := 0.3
 const JOURNEY_RIDE_DURATION_MAX := 1.5
 const JOURNEY_TURN_AWAY_DURATION := 1.6
 
+## A brand-new lobby arrival's own walk-in (ticket 10 amendment: a whole
+## day's demand pops in at once with no animation, this stretches each
+## member's own on-screen entrance into a real trickle -- see the "Lobby
+## guests" section's own header comment further down for the full picture).
+## ARRIVAL_WALK_DURATION is this file's usual walk-leg length
+## (JOURNEY_WALK_DURATION); ARRIVAL_SPAWN_STAGGER_SECONDS is how far apart,
+## in real time, successive brand-new members start their own walk,
+## regardless of how many landed in the same Sim batch; LOBBY_ARRIVAL_SPAWN_OFFSET_X
+## is how far to the right of its own queue slot a fresh arrival spawns,
+## comfortably past BUILDING_WIDTH (and past a busy queue's own overflow past
+## that edge) so the walk-on is never seen starting mid-air over the lobby.
+const ARRIVAL_WALK_DURATION := JOURNEY_WALK_DURATION
+const ARRIVAL_SPAWN_STAGGER_SECONDS := 0.45
+const LOBBY_ARRIVAL_SPAWN_OFFSET_X := 160.0
+
 ## A small riding-only decoration parented to the travelling actor for the
 ## shaft-transit leg only (added/removed by _attach_elevator_car()/
 ## _detach_elevator_car()) -- "rides the car" (spec.md story 23) without a
@@ -241,15 +256,44 @@ var _cached_dining_signature := ""
 ## moves), so it's set once in rebuild() rather than per-frame.
 var _reception_tap_rect: Rect2 = Rect2()
 
-## Ticket 10: lobby guest actors ("<party_id>:<member_index>" -> GuestActor),
-## rebuilt whenever Sim.pending_arrivals changes -- see _process()'s
-## signature check below, same pattern as _cached_dining_signature. Since
-## Patience decays every tick, this signature (unlike the structural ones
-## above) changes every tick too, so a lobby guest's mood face is kept
-## current by the same full rebuild that would otherwise only be needed for
-## arrivals/departures -- mirroring _rebuild_diners()'s identical tradeoff.
+## Ticket 10: settled lobby guest actors ("<party_id>:<member_index>" ->
+## GuestActor), refreshed whenever Sim.pending_arrivals changes -- see
+## _process()'s signature check below, same pattern as
+## _cached_dining_signature. Since Patience decays every tick, this
+## signature (unlike the structural ones above) changes every tick too, so a
+## lobby guest's mood face is kept current every tick right alongside
+## arrivals/departures, mirroring _rebuild_diners()'s identical tradeoff --
+## but (unlike that full-teardown rebuild) each already-settled actor here
+## is only repositioned/re-mooded in place, never freed and recreated, so a
+## brand-new member's own walk-in journey (_arrival_journeys below) is never
+## interrupted by its neighbours' routine per-tick refresh.
 var _lobby_guest_actors: Dictionary = {}
 var _cached_lobby_signature := ""
+
+## Every brand-new key discovered by a lobby rebuild, awaiting its own
+## staggered turn to start walking in -- {key, party_id, member_index}
+## entries, drained one at a time by _process_arrival_spawn_queue().
+var _arrival_spawn_queue: Array = []
+
+## Seconds until _process_arrival_spawn_queue() may start the next queued
+## walk-in -- ticks down every frame regardless of _lobby_signature() changing
+## (patience decay would otherwise re-trigger a rebuild every tick without
+## ever letting this cool down).
+var _arrival_spawn_timer: float = 0.0
+
+## Every member currently mid-walk-in, keyed the same as _lobby_guest_actors
+## -- {actor: GuestActor, tween: Tween}. Owns that key's visible actor until
+## _finish_arrival_walk() graduates it into _lobby_guest_actors, mirroring
+## _active_room_journeys'/_staffer_travel's identical split.
+var _arrival_journeys: Dictionary = {}
+
+## Every key that has ever been queued for its own arrival walk-in, kept
+## (unlike _lobby_guest_actors/_arrival_journeys) across a structural
+## rebuild's wholesale actor teardown -- _rebuild_building() clears those two
+## but deliberately leaves this one alone, so a guest who already walked in
+## once re-settles directly at its slot after such a rebuild instead of
+## playing its walk-in a second time.
+var _seen_arrival_keys: Dictionary = {}
 
 ## Ticket 12: every settled Room occupant's actor(s) -- room_key
 ## ("<room_type_id>:<instance_id>") -> Array[RoomOccupantActor] -- rebuilt
@@ -414,6 +458,7 @@ func _process(delta: float) -> void:
 
 	_poll_waiting_journeys()
 	_sync_staffer_travel()
+	_process_arrival_spawn_queue(delta)
 
 	var floor_count := BuildingLayout.unlocked_room_type_ids_ascending(GameState.rooms, GameState.stars).size()
 	if floor_count != _cached_floor_count:
@@ -486,6 +531,21 @@ func _rebuild_building() -> void:
 		if j.get("tween") != null and j["tween"].is_valid():
 			j["tween"].kill()
 	_staffer_travel.clear()
+
+	## Same defensive teardown for an in-flight arrival walk-in -- and, unlike
+	## the two journey dicts above, _lobby_guest_actors itself also needs
+	## clearing here: _rebuild_lobby_guests() now updates an already-known
+	## key's actor in place rather than freeing and recreating it every call,
+	## so without this it would go on repositioning actors this rebuild is
+	## about to free out from under it. _arrival_spawn_queue holds no actors
+	## of its own yet (its entries are still id references awaiting their
+	## turn), so it's cleared, not torn down.
+	for j in _arrival_journeys.values():
+		if j.get("tween") != null and j["tween"].is_valid():
+			j["tween"].kill()
+	_arrival_journeys.clear()
+	_lobby_guest_actors.clear()
+	_arrival_spawn_queue.clear()
 
 	for child in _building.get_children():
 		child.queue_free()
@@ -843,7 +903,7 @@ func _dining_signature() -> String:
 	return str(Sim.walkin_queue) + "|" + str(Sim.dinner_jobs())
 
 
-## --- Lobby guests: mood faces, Needs bubbles, and selection (tickets 10/11) ---
+## --- Lobby guests: mood faces, Needs bubbles, selection, and arrival (tickets 10/11) ---
 ##
 ## An arriving Party stands in the lobby as one GuestActor per member
 ## (sim/building_layout.gd's lobby_guest_placements()), each carrying an
@@ -859,41 +919,200 @@ func _dining_signature() -> String:
 ## already-selected guest closes it again (_end_guest_drag()); tapping a
 ## different guest, or dragging one onto a bay, are handled by the
 ## tap/drag gesture code below.
+##
+## A brand-new member (a key _lobby_guest_actors has never held) doesn't pop
+## straight into its queue slot: it's queued (_arrival_spawn_queue) and, one
+## at a time, walked in for real -- spawned off-screen to the right of the
+## building and tweened to its slot (_start_arrival_walk()) -- so a whole
+## day's demand (Sim generates it in one Morning batch; this is presentation
+## only, per spec.md's "the animation never gates the simulation") reads as a
+## continual trickle of arrivals rather than the whole queue popping in at
+## once. A member mid-walk lives in _arrival_journeys, not
+## _lobby_guest_actors, until it arrives (_finish_arrival_walk()) -- same
+## "owns the guest until it graduates" split every other journey dict in this
+## file (_active_room_journeys, _staffer_travel) already uses, and the same
+## reason _guest_key_at()'s tap hit-testing only ever finds a settled guest.
 
 func _lobby_signature() -> String:
 	return str(Sim.pending_arrivals)
 
 
 func _rebuild_lobby_guests(floors: Array) -> void:
-	for actor in _lobby_guest_actors.values():
-		actor.queue_free()
-	_lobby_guest_actors.clear()
-
 	var patience_cfg: Dictionary = GameState.balance["patience"]
-	for placement in BuildingLayout.lobby_guest_placements(Sim.pending_arrivals):
+	var placements := BuildingLayout.lobby_guest_placements(Sim.pending_arrivals)
+	var seen: Dictionary = {}
+
+	for placement in placements:
 		var party_id: int = int(placement["party_id"])
 		var member_index: int = int(placement["member_index"])
+		var key := _guest_key(party_id, member_index)
+		seen[key] = true
+
 		var party := Sim.pending_party(party_id)
 		var point: Vector2 = BuildingLayout.resolve_lobby_guest_point(floors, int(placement["queue_index"]))
 
-		var actor := GuestActor.new()
-		_building.add_child(actor)
-		actor.configure(party_id, member_index, String(party["species_id"]))
-		actor.position = point
-		actor.update_mood(float(party["patience"]), patience_cfg)
-		_lobby_guest_actors[_guest_key(party_id, member_index)] = actor
+		if _arrival_journeys.has(key):
+			(_arrival_journeys[key]["actor"] as GuestActor).update_mood(float(party["patience"]), patience_cfg)
+			continue
+
+		if _lobby_guest_actors.has(key):
+			var actor: GuestActor = _lobby_guest_actors[key]
+			actor.position = point
+			actor.update_mood(float(party["patience"]), patience_cfg)
+			continue
+
+		if _is_queued_for_spawn(key):
+			## Already queued, just waiting its own staggered turn -- nothing
+			## to do this tick. Checked before _seen_arrival_keys below since
+			## that key was marked seen the moment it was queued, not the
+			## moment it actually started walking.
+			continue
+
+		if _seen_arrival_keys.has(key):
+			## Already walked in once before (or was mid-walk-in) but its actor
+			## got swept away by an unrelated structural rebuild (a floor
+			## unlocking, ticket 12's own precedent for this exact trade-off) --
+			## it re-settles directly at its slot rather than replaying its
+			## walk-in a second time.
+			var settled := GuestActor.new()
+			_building.add_child(settled)
+			settled.configure(party_id, member_index, String(party["species_id"]))
+			settled.position = point
+			settled.update_mood(float(party["patience"]), patience_cfg)
+			_lobby_guest_actors[key] = settled
+			continue
+
+		## Truly never seen before -- queue it for its own staggered walk-in
+		## rather than creating it here outright.
+		_seen_arrival_keys[key] = true
+		_arrival_spawn_queue.append({"key": key, "party_id": party_id, "member_index": member_index})
+
+	## Anyone no longer present (seated or walked away) loses their actor,
+	## whether settled or still mid-walk-in, and is forgotten -- a future
+	## Party never reuses an old party_id (Sim's own _next_party_id only
+	## grows), so there's no risk of mistaking a fresh arrival for this one.
+	for key in _lobby_guest_actors.keys().duplicate():
+		if not seen.has(key):
+			_lobby_guest_actors[key].queue_free()
+			_lobby_guest_actors.erase(key)
+	for key in _arrival_journeys.keys().duplicate():
+		if not seen.has(key):
+			_cancel_arrival_journey(key)
+	for entry in _arrival_spawn_queue.duplicate():
+		if not seen.has(String(entry["key"])):
+			_arrival_spawn_queue.erase(entry)
+	for key in _seen_arrival_keys.keys().duplicate():
+		if not seen.has(key):
+			_seen_arrival_keys.erase(key)
 
 	## A rebuild can drop the guest a currently-open Needs bubble belongs to
 	## (its Party got seated or walked away) or shift it to a new queue
 	## position (an earlier Party leaving pulls everyone behind it forward)
 	## -- close the bubble in the first case, follow the guest in the
 	## second, rather than leaving it anchored to a stale position or a
-	## freed actor.
+	## freed actor. A guest still mid-walk-in was never selectable in the
+	## first place (see _guest_key_at()), so it can never own the bubble.
 	if _needs_bubble != null:
 		if _lobby_guest_actors.has(_needs_bubble_key):
 			_needs_bubble.position = _lobby_guest_actors[_needs_bubble_key].position + NEEDS_BUBBLE_OFFSET
 		else:
 			_close_needs_bubble()
+
+
+## True iff key is still sitting in _arrival_spawn_queue, awaiting its own
+## staggered turn -- checked by _rebuild_lobby_guests() before it ever
+## consults _seen_arrival_keys, since a queued-but-not-yet-started key is
+## marked seen there too (at queue time, not start time) and would otherwise
+## be mistaken for a structural-rebuild survivor on the very next tick.
+func _is_queued_for_spawn(key: String) -> bool:
+	for entry in _arrival_spawn_queue:
+		if String(entry["key"]) == key:
+			return true
+	return false
+
+
+## Drains _arrival_spawn_queue one entry at a time, ARRIVAL_SPAWN_STAGGER_SECONDS
+## apart -- called every frame from _process() regardless of whether a lobby
+## rebuild happened this tick, since patience decay's every-tick rebuild would
+## otherwise never leave this alone long enough to matter.
+func _process_arrival_spawn_queue(delta: float) -> void:
+	if _arrival_spawn_queue.is_empty():
+		return
+	_arrival_spawn_timer -= delta
+	if _arrival_spawn_timer > 0.0:
+		return
+	var entry: Dictionary = _arrival_spawn_queue.pop_front()
+	_start_arrival_walk(String(entry["key"]), int(entry["party_id"]), int(entry["member_index"]))
+	_arrival_spawn_timer = ARRIVAL_SPAWN_STAGGER_SECONDS
+
+
+## Spawns key's GuestActor off-screen to the right of its own queue slot and
+## tweens it in over ARRIVAL_WALK_DURATION -- the queue slot is resolved fresh
+## here (not at discovery time), since the queue can have reflowed in the
+## stagger delay between _rebuild_lobby_guests() first seeing this key and its
+## turn coming up. A no-op if the Party (or this specific member -- an
+## oversized Party partially seated out from under its own still-queued
+## members, an edge case today's split-across-rooms rule allows) has vanished
+## in that same window.
+func _start_arrival_walk(key: String, party_id: int, member_index: int) -> void:
+	var party := Sim.pending_party(party_id)
+	if party.is_empty() or member_index >= int(party["party_size"]):
+		return
+
+	var floors := BuildingLayout.floors(GameState.rooms, GameState.stars)
+	var queue_index := -1
+	for placement in BuildingLayout.lobby_guest_placements(Sim.pending_arrivals):
+		if int(placement["party_id"]) == party_id and int(placement["member_index"]) == member_index:
+			queue_index = int(placement["queue_index"])
+			break
+	if queue_index == -1:
+		return
+
+	var destination: Vector2 = BuildingLayout.resolve_lobby_guest_point(floors, queue_index)
+	var spawn_point := destination + Vector2(LOBBY_ARRIVAL_SPAWN_OFFSET_X, 0.0)
+
+	var actor := GuestActor.new()
+	_building.add_child(actor)
+	actor.configure(party_id, member_index, String(party["species_id"]), "walk")
+	actor.position = spawn_point
+	actor.set_flip_h(true) # walking in from the right, so always facing left
+	actor.update_mood(float(party["patience"]), GameState.balance["patience"])
+
+	var tween := create_tween()
+	tween.tween_property(actor, "position", destination, ARRIVAL_WALK_DURATION)
+	tween.tween_callback(_finish_arrival_walk.bind(key))
+
+	_arrival_journeys[key] = {"actor": actor, "tween": tween}
+
+
+## Arrival: swaps the travelling actor's own sprite back to "idle" and hands
+## the key to the ordinary settled-guest dict, forced immediately (rather
+## than waiting for the next signature-driven rebuild) so there's no one-frame
+## gap with no guest visible at all -- mirrors _finish_checkin_journey()'s
+## same reasoning.
+func _finish_arrival_walk(key: String) -> void:
+	var j: Dictionary = _arrival_journeys.get(key, {})
+	if j.is_empty():
+		return
+	var actor: GuestActor = j["actor"]
+	actor.configure(actor.party_id, actor.member_index, String(Sim.pending_party(actor.party_id).get("species_id", "")))
+	actor.set_flip_h(false)
+	_arrival_journeys.erase(key)
+	_lobby_guest_actors[key] = actor
+
+
+## Kills key's in-flight arrival journey (if any) and frees its travelling
+## actor immediately, with no completion side effects -- the arrival-side
+## mirror of _cancel_journey() above.
+func _cancel_arrival_journey(key: String) -> void:
+	var j: Dictionary = _arrival_journeys.get(key, {})
+	if j.is_empty():
+		return
+	if j.get("tween") != null and j["tween"].is_valid():
+		j["tween"].kill()
+	if j.get("actor") != null:
+		j["actor"].queue_free()
+	_arrival_journeys.erase(key)
 
 
 func _guest_key(party_id: int, member_index: int) -> String:

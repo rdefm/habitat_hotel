@@ -55,10 +55,16 @@ func _add_sprite(resolved: Dictionary, size: Vector2, fps: float, loop: bool = t
 			atlas.region = Rect2(col * frame_width, row * frame_height, frame_width, frame_height)
 			frames.add_frame("play", atlas)
 
+	## resolved["foot_padding"] (sim/building_layout.gd's CHARACTER_FOOT_PADDING,
+	## 0.0 for art that's already flush) nudges the sprite down by that much of
+	## its own empty margin, scaled the same way the frame itself is, so this
+	## node's bottom-center origin lands on the character's actual feet rather
+	## than the frame's bare bottom edge.
+	var foot_padding: float = float(resolved.get("foot_padding", 0.0))
 	var sprite := AnimatedSprite2D.new()
 	sprite.sprite_frames = frames
 	sprite.centered = true
-	sprite.position = Vector2(0, -size.y / 2.0)
+	sprite.position = Vector2(0, -size.y / 2.0 + foot_padding * (size.y / frame_height))
 	sprite.scale = Vector2(size.x / frame_width, size.y / frame_height)
 	add_child(sprite)
 	if not loop and on_finished.is_valid():

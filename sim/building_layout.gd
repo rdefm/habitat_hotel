@@ -606,6 +606,23 @@ const CHARACTER_SPRITE_FILE := {
 	},
 }
 
+## Per-character-slot vertical correction, in source-frame pixels, for a
+## sheet whose actual art doesn't reach its own frame's bottom edge --
+## ui/character_sprite.gd's bottom-center anchor convention otherwise
+## renders that empty margin as visible daylight between the character's
+## feet and the floor it's meant to stand on. Measured directly against
+## each sheet (the deepest foot position across every frame, so no frame
+## ever gets its feet clipped): Manny's walk/working sheets carry the
+## worst gap (256px frames, feet bottoming out around row 219/225), his
+## idle still is already flush enough to skip; Shelly's convention-slot
+## sheets carry a small one of their own (64px frames, feet at row 59).
+const CHARACTER_FOOT_PADDING := {
+	"staffer": {
+		"manny": {"walk": 37.0, "working": 31.0},
+		"shelly": {"idle": 5.0, "walk": 5.0},
+	},
+}
+
 ## One-time alias, same reasoning as CHARACTER_SPRITE_FILE above, for
 ## Manny's own ambient idle-animation clip (resolve_character_idle_clips()
 ## below) -- his 82x82 frame size doesn't fit the 64x64 convention any more
@@ -635,20 +652,25 @@ const CHARACTER_IDLE_CLIP_FILE := {
 ##     the file exists and reading its real pixel size) resolves this;
 ##     injectable so tests don't touch the filesystem.
 ##  3. The tinted, labelled placeholder.
-## Returns {kind: "sprite", file, frame_width, frame_height, size} or
-## {kind: "placeholder", size, tint, label}. The renderer loads whatever
-## "file" this hands it and slices it into frame_width x frame_height
-## frames off the loaded texture's own real dimensions -- this function
-## never itself counts frames.
+## Returns {kind: "sprite", file, frame_width, frame_height, size,
+## foot_padding} or {kind: "placeholder", size, tint, label}. The renderer
+## loads whatever "file" this hands it and slices it into frame_width x
+## frame_height frames off the loaded texture's own real dimensions -- this
+## function never itself counts frames. foot_padding (CHARACTER_FOOT_PADDING
+## above, 0.0 for everyone not listed there) is the renderer's cue to nudge
+## the sprite down by that much (scaled) so real, uncorrected art still
+## stands on the anchor rather than floating above it.
 static func resolve_character_sprite(kind: String, character_id: String, state: String, probe_fn: Callable = Callable()) -> Dictionary:
+	var foot_padding: float = float(CHARACTER_FOOT_PADDING.get(kind, {}).get(character_id, {}).get(state, 0.0))
+
 	var alias: Dictionary = CHARACTER_SPRITE_FILE.get(kind, {}).get(character_id, {}).get(state, {})
 	if not alias.is_empty():
-		return _character_sprite_result(String(alias["file"]), float(alias["frame_width"]), float(alias["frame_height"]))
+		return _character_sprite_result(String(alias["file"]), float(alias["frame_width"]), float(alias["frame_height"]), foot_padding)
 
 	var conventional_path := "%s%ss/%s_%s.png" % [CHARACTER_DIR, kind, character_id, state]
 	var sheet_size = probe_fn.call(conventional_path) if probe_fn.is_valid() else _probe_character_sheet_size(conventional_path)
 	if sheet_size != null:
-		return _character_sprite_result(conventional_path, CHARACTER_FRAME_SIZE, CHARACTER_FRAME_SIZE)
+		return _character_sprite_result(conventional_path, CHARACTER_FRAME_SIZE, CHARACTER_FRAME_SIZE, foot_padding)
 
 	return {
 		"kind": "placeholder",
@@ -658,13 +680,14 @@ static func resolve_character_sprite(kind: String, character_id: String, state: 
 	}
 
 
-static func _character_sprite_result(file: String, frame_width: float, frame_height: float) -> Dictionary:
+static func _character_sprite_result(file: String, frame_width: float, frame_height: float, foot_padding: float = 0.0) -> Dictionary:
 	return {
 		"kind": "sprite",
 		"file": file,
 		"frame_width": frame_width,
 		"frame_height": frame_height,
 		"size": Vector2(CHARACTER_FRAME_SIZE, CHARACTER_FRAME_SIZE),
+		"foot_padding": foot_padding,
 	}
 
 
