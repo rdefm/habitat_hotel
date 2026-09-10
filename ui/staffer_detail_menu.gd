@@ -2,8 +2,9 @@ class_name StafferDetailMenu
 extends VBoxContainer
 
 ## Bespoke small popup (ADR-0011) shown when tapping any Staffer at their
-## Station placement -- Reception-area Stations (ui/station_panel.gd,
-## ticket 04) or the Terrace's Kitchen slot (ui/terrace_menu.gd, ticket 05).
+## Station placement -- Reception-area Stations (ui/hotel_world.gd's own
+## Station posts, ADR-0020 ticket 07) or the Terrace's Kitchen slot
+## (ui/terrace_menu.gd, ticket 05).
 ## Replaces the retired ui/roster_menu.gd as the place to see a Staffer's
 ## per-Station Skill, Traits, and current assignment (ticket 06). Traits are
 ## shown defensively via staffer.get("traits", []) since no Staffer carries

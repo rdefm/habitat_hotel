@@ -104,9 +104,9 @@ func _ready() -> void:
 	## Ticket 04's "ease back to fit-all" camera control -- unlike Pause/1x/2x,
 	## spec.md doesn't send this one behind the gear (story 4 wants it a
 	## single reachable control), so it's its own strip button. Hidden until
-	## configure() is called with a valid callback: only USE_HOTEL_WORLD's
-	## Node2D world has a camera to reset, and main_screen.gd is the one that
-	## knows whether that's the case.
+	## configure() is called with a valid callback -- main_screen.gd does so
+	## unconditionally now that ui/hotel_world.gd is the game's only play
+	## surface (ticket 17).
 	_fit_all_button = Button.new()
 	_fit_all_button.text = "Fit All"
 	_fit_all_button.visible = false
